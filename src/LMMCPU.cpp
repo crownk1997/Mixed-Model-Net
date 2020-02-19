@@ -691,7 +691,7 @@ void LMMCPU::calBeta(const double *VinvChromy) {
 
 }
 
-void LMMCPU::estimateFixEff(const double *Pheno) {
+void LMMCPU::estimateFixEff(const double *Pheno, bool useApproximate) {
   // solve the conjugate gradient omegia^-1y (without leaving one out strategy) together
   const double *covarMatrix = covarBasis.getCovarMatrix(); // get covarMatrix
 
@@ -705,8 +705,14 @@ void LMMCPU::estimateFixEff(const double *Pheno) {
   conjugateResultFixEff = ALIGN_ALLOCATE_DOUBLES(Npad * batchsize);
   memset(conjugateResultFixEff, 0, Npad * batchsize * sizeof(double));
 
-  cout << endl << "Solve conjugate gradient in estimating fix effect " << endl;
-  calConjugateWithoutMask(conjugateResultFixEff, inputMatrix, batchsize); // get two parts conjugate gradient result
+  if (!useApproximate) {
+    // compute the conjugate gradient to get the exact result
+    cout << endl << "Solve conjugate gradient in estimating fix effect " << endl;
+    calConjugateWithoutMask(conjugateResultFixEff, inputMatrix, batchsize); // get two parts conjugate gradient result
+  } else {
+    // use the approximate fix effect to boost the performance
+    memcpy(conjugateResultFixEff, inputMatrix, Npad * batchsize * sizeof(double));
+  }
 
   // compute Z^Tomegia^-1Z
   double *ZTOinvZ = ALIGN_ALLOCATE_DOUBLES(covarBasis.getC() * covarBasis.getC());

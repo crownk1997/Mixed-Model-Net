@@ -644,7 +644,7 @@ void GeneticCorr::calTraceMoM(double &kv, double &kvkv, const char whichData) {
 #endif
 }
 
-void GeneticCorr::estFixEff(const double *mainGenoPheno, const double *auxGenoPheno) {
+void GeneticCorr::estFixEff(const double *mainGenoPheno, const double *auxGenoPheno, bool useApproximate) {
   // get covarMatrix from two datasets
   const double *covarMatrix = covarBasis.getCovarMatrix();
   const double *auxcovarMatrix = auxcovarBasis.getCovarMatrix();
@@ -664,9 +664,29 @@ void GeneticCorr::estFixEff(const double *mainGenoPheno, const double *auxGenoPh
   cout << endl << "Solving conjugate gradient in estimaing fix effect" << endl;
   Timer timer;
   conjugateResultFixEff = ALIGN_ALLOCATE_DOUBLES((NpadGeno + Npadaux) * (batchSize1 + batchSzie2 - 1));
-  solveConjugateBatch(conjugateResultFixEff, inputMatrix1, inputMatrix2, (batchSize1 + batchSzie2 - 1));
 
-  cout << "Time for solving conjugate gradient is " << timer.update_time() << " sec" << endl;
+  if (!useApproximate) {
+    // use the conjugate gradient to compute the exact fix effect
+    solveConjugateBatch(conjugateResultFixEff, inputMatrix1, inputMatrix2, (batchSize1 + batchSzie2 - 1));
+
+    cout << "Time for solving conjugate gradient is " << timer.update_time() << " sec" << endl;
+  } else {
+    // use the approximate fix effect to boost the program performance
+    memset(conjugateResultFixEff, 0, (NpadGeno + Npadaux) * (batchSize1 + batchSzie2 - 1) * sizeof(double));
+    // copy the first input matrix to the specific section in the whole matrix
+    for (int col = 0; col < batchSize1; col++) {
+      memcpy(conjugateResultFixEff + col * (NpadGeno + Npadaux), inputMatrix1 + NpadGeno * col, NpadGeno * sizeof(double));
+    }
+
+    // copy the second input matrix to the specific section in the whole matrix
+    double *temp = conjugateResultFixEff + (NpadGeno + Npadaux) * batchSize1 + NpadGeno;
+    for (int col = 0; col < batchSzie2; col++) {
+      memcpy(temp + col * (NpadGeno + Npadaux), inputMatrix2 + (col + 1) * Npadaux, Npadaux * sizeof(double));
+    }
+
+    // copy the phenotype data into one column
+    memcpy(conjugateResultFixEff + NpadGeno, inputMatrix2, Npadaux * sizeof(double));
+  }
 
   uint64 totalSamples = NpadGeno + Npadaux;
   // create whole matrix z by merge two covariate matrix

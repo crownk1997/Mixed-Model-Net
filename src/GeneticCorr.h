@@ -140,7 +140,7 @@ class GeneticCorr {
   ~GeneticCorr();
 
   void compVCM(const double *genoProjecPheno, const double *auxProjectPheno);
-  void estFixEff(const double *mainGenoPheno, const double *auxGenoPheno);
+  void estFixEff(const double *mainGenoPheno, const double *auxGenoPheno, bool useApproximate);
   void estPosteriorMean();
   void predict(double *output, const GenoData &predictData, const CovarBasis<GenoData> &predictCov) const;
 };

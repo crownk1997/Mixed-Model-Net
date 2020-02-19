@@ -154,7 +154,7 @@ int main(int argc, char **argv) {
 
     vector<vector<double> > mainPheno = phenobasis.getPhenodbl();
     vector<vector<double> > auxPheno = auxphenobasis.getPhenodbl();
-    geneticCorr.estFixEff(mainPheno[0].data(), auxPheno[0].data()); // estimate fix effect with original phenotype data
+    geneticCorr.estFixEff(mainPheno[0].data(), auxPheno[0].data(), params.useApproFixEffect); // estimate fix effect with original phenotype data
 
     cout << "Time for estimating fix effect is " << timer.update_time() << " sec" << endl;
 
@@ -214,7 +214,7 @@ int main(int argc, char **argv) {
     cout << endl << "***** Compute the estimate for fix effect w *****" << endl << endl;
 
     vector<vector<double> > phenodblorigin = phenobasis.getPhenodbl(); // here we use the original pheno data
-    lmmcpu.estimateFixEff(phenodblorigin[0].data());
+    lmmcpu.estimateFixEff(phenodblorigin[0].data(), params.useApproFixEffect);
 
     cout << "Timer for estimating fix effect " << timer.update_time() << " esc" << endl;
 

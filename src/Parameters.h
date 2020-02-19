@@ -71,6 +71,7 @@ class Params {
   bool prediction;
   bool geneticCorr;
   bool samplesCalibrationFactor;
+  bool useApproFixEffect;
 
   // for setting quality control
   double maxMissingPerSnp, maxMissingPerIndiv;
