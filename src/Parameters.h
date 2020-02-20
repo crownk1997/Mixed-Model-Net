@@ -73,6 +73,8 @@ class Params {
   bool samplesCalibrationFactor;
   bool useApproFixEffect;
 
+  std::string imputeMethod;
+
   // for setting quality control
   double maxMissingPerSnp, maxMissingPerIndiv;
   int maxModelSnps; // the maximum number of snps analysis

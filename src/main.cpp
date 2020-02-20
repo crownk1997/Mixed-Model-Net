@@ -141,7 +141,7 @@ int main(int argc, char **argv) {
 
     GeneticCorr
         geneticCorr(genoData, covarBasis, &maskIndivs[0], auxData, auxCovBasis, &auxmaskIndivs[0], params.snpsPerBlock,
-                    params.estIterationTrace, params.useExactTrace, params.outputFile);
+                    params.estIterationTrace, params.useExactTrace, params.imputeMethod, params.outputFile);
 
     cout << "Time for initializing genetic object and normalizing snps is " << timer.update_time() << " sec" << endl;
 
@@ -200,7 +200,7 @@ int main(int argc, char **argv) {
   cout << endl << "***** Initializing lmmnet object and normlizing snps *****" << endl << endl;
 
   LMMCPU lmmcpu(genoData, covarBasis, &maskIndivs[0], params.snpsPerBlock, params.estIterationTrace, params.numChrom,
-                params.numCalibSnps, params.useExactTrace, params.outputFile);
+                params.numCalibSnps, params.useExactTrace, params.imputeMethod, params.outputFile);
 
   cout << "Time for initializing lmmnet object and normalizing snps is " << timer.update_time() << " sec" << endl;
 

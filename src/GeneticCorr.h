@@ -63,8 +63,9 @@ class GeneticCorr {
   std::vector<double> fixEffect;
   std::vector<double> posteriorMean;
 
+  std::string imputeMethod;
   // outputfile name
-  std::string outputFile;
+  const std::string outputFile;
 
   bool useExactTrace; // whether compute the exact trace
 
@@ -120,7 +121,7 @@ class GeneticCorr {
   // predict on new data
   void buildPredictSnpsLookupTable(uint64 m,
                                    uint64 numPredict,
-                                   double *snpVector,
+                                   const double *snpVector,
                                    double (*predictionSnpLookupTable)[4]) const;
   void predictRandomEff(uint64 numPredict, double *predictMaskIndivs, double *randomEff,
                         double (*predictionSnpLookupTable)[4], const GenoData &predictData) const;
@@ -136,7 +137,8 @@ class GeneticCorr {
               int _snpsPerBlock,
               uint64 _estIteration,
               bool _useExactTrace,
-              std::string _outputFile);
+              const std::string _inputeMethod,
+              const std::string _outputFile);
   ~GeneticCorr();
 
   void compVCM(const double *genoProjecPheno, const double *auxProjectPheno);

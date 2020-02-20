@@ -63,7 +63,9 @@ class LMMCPU {
   std::map<int, uint64> numSnpsPerChrom;
   std::vector<uint64> chromStartPoint;
 
-  std::string outputFile;
+  std::string imputeMethod;
+
+  const std::string outputFile;
 
   // statistics used to calculate association test
   double calibrationFactor;
@@ -129,7 +131,8 @@ class LMMCPU {
          int _numChrom,
          int _numCalibSnps,
          bool _useExactTrace,
-         std::string _outputFile);
+         const std::string _imputeMethod,
+         const std::string _outputFile);
   ~LMMCPU();
 
   void calHeritability(const double *projectPheno);

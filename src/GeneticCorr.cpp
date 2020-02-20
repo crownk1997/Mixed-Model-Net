@@ -49,7 +49,8 @@ GeneticCorr::GeneticCorr(const LMMNET::GenoData &_genoData,
                          int _snpsPerBlock,
                          uint64 _estIteration,
                          bool _useExactTrace,
-                         std::string _outputFIle) : genoData(_genoData),
+                         const std::string _imputeMethod,
+                         const std::string _outputFIle) : genoData(_genoData),
                                                     covarBasis(_covarBasis),
                                                     maskgenoIndivs(_maskgenoIndivs),
                                                     auxgenoData(_auxgenoData),
@@ -58,6 +59,7 @@ GeneticCorr::GeneticCorr(const LMMNET::GenoData &_genoData,
                                                     snpsPerBlock(_snpsPerBlock),
                                                     estIteration(_estIteration),
                                                     useExactTrace(_useExactTrace),
+                                                    imputeMethod(_imputeMethod),
                                                     outputFile(_outputFIle) {
   initialize();
 }
@@ -139,6 +141,8 @@ void GeneticCorr::initialize() {
     }
   }
 
+  cout << "Impute missing value by " << imputeMethod << endl;
+
   // flip the lookup table according to the allel reference
   const vector<SnpInfo> &mainInfo = genoData.getSnpInfo();
   const vector<SnpInfo> &auxInfo = auxgenoData.getSnpInfo();
@@ -189,7 +193,18 @@ bool GeneticCorr::normalizeSnps(uint64 m,
   snpLookupTable[m][0] = -mean * invMeanCenterNorm;
   snpLookupTable[m][1] = (1 - mean) * invMeanCenterNorm;
   snpLookupTable[m][2] = (2 - mean) * invMeanCenterNorm;
-  snpLookupTable[m][3] = -mean * invMeanCenterNorm;
+
+  // transform the input to lower case in case of sensitive
+  transform(imputeMethod.begin(), imputeMethod.end(), imputeMethod.begin(), ::tolower);
+  if (imputeMethod == "zero") {
+    snpLookupTable[m][3] = -mean * invMeanCenterNorm;
+  } else if (imputeMethod == "mean") {
+    snpLookupTable[m][3] = 0;
+  } else {
+    cout << "Warning: There is no such imputing method. Use the mean value to impute." << endl;
+    imputeMethod = "mean";
+    snpLookupTable[m][3] = 0;
+  }
 
   meanstd[m] = std::make_pair(mean, invMeanCenterNorm);
 
@@ -1201,7 +1216,7 @@ void GeneticCorr::predict(double *output, const GenoData &predictData, const Cov
 
 void GeneticCorr::buildPredictSnpsLookupTable(uint64 m,
                                               uint64 numPredict,
-                                              double *snpVector,
+                                              const double *snpVector,
                                               double (*predictionSnpLookupTable)[4]) const {
 //      // get the mode of each snp
 //      vector <uint64> snpsCounts;
@@ -1213,10 +1228,30 @@ void GeneticCorr::buildPredictSnpsLookupTable(uint64 m,
 //      // find the mode index in this case, which is one of 0, 1, 2
 //      int mode = std::distance(snpsCounts.begin(), std::max_element(snpsCounts.begin(), snpsCounts.end()));
 
+  // get the mean of each snp
+  uint64 sum = 0;
+  uint64 numIndivs = 0;
+  for (uint64 n = 0; n < numPredict; n++) {
+    if (snpVector[n] != 9) {
+      sum += snpVector[n];
+      numIndivs++;
+    }
+  }
+
+  double mean = static_cast<double>(sum) / numIndivs;
+
   predictionSnpLookupTable[m][0] = 0;
   predictionSnpLookupTable[m][1] = 1;
   predictionSnpLookupTable[m][2] = 2;
-  predictionSnpLookupTable[m][3] = 0;
+
+  if (imputeMethod == "zero") {
+    predictionSnpLookupTable[m][3] = mean;
+  } else if (imputeMethod == "mean") {
+    predictionSnpLookupTable[m][3] = 0;
+  } else {
+    cout << "Warning: There is no such imputing method. Use the mean value to impute." << endl;
+    predictionSnpLookupTable[m][3] = mean;
+  }
 }
 
 void GeneticCorr::predictRandomEff(uint64 numPredict, double *predictMaskIndivs, double *randomEff,

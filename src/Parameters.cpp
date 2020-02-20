@@ -111,6 +111,7 @@ bool Params::processCommandLineArgs(int argc, char **argv) {
       ("maxModelSnps", value<int>(&maxModelSnps)->default_value(1000000), "the maximum number of snps in model")
       ("useExactTrace", value<bool>(&useExactTrace)->default_value(false), "whether compute the exact trace")
       ("useApproFixEffect", value<bool>(&useApproFixEffect)->default_value(false), "whether use the approximate fix effect to reduce computation time")
+      ("imputeMethod", value<string>(&imputeMethod)->default_value("mean"), "The way to impute missing value. Either using mean value or zero")
 
       ("outputFile", value<string>(&outputFile)->default_value("./result.txt"), "output file for the final result");
 

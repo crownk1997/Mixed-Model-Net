@@ -20,6 +20,7 @@
 #include <assert.h>
 #include <math.h>
 #include <cmath>
+#include<bits/stdc++.h>
 
 #include <mkl.h>
 
@@ -56,7 +57,8 @@ LMMCPU::LMMCPU(const LMMNET::GenoData &_genoData,
                int _numChrom,
                int _numCalibSnps,
                bool _useExactTrace,
-               std::string _outputFile) : genoData(_genoData),
+               const std::string _imputeMethod,
+               const std::string _outputFile) : genoData(_genoData),
                                           covarBasis(_covarBasis),
                                           maskIndivs(_maskIndivs),
                                           snpsPerBlock(_snpsPerBlock),
@@ -64,6 +66,7 @@ LMMCPU::LMMCPU(const LMMNET::GenoData &_genoData,
                                           numChrom(_numChrom),
                                           numCalibSnps(_numCalibSnps),
                                           useExactTrace(_useExactTrace),
+                                          imputeMethod(_imputeMethod),
                                           outputFile(_outputFile) {
   initialize();
 }
@@ -108,7 +111,8 @@ void LMMCPU::initialize() {
     }
   }
 
-  chromID.reserve(M);
+  cout << "Impute missing value by " << imputeMethod << endl;
+  chromID.resize(M);
   // get the number of SNPs per chromsome
   const vector<SnpInfo> &snpsInfo = genoData.getSnpInfo();
   for (uint64 m = 0; m < M; m++) {
@@ -167,8 +171,18 @@ uchar LMMCPU::normalizeSnps(uint64 m, double *snpVector) {
   snpLookupTable[m][0] = -mean * invMeanCenterNorm;
   snpLookupTable[m][1] = (1 - mean) * invMeanCenterNorm;
   snpLookupTable[m][2] = (2 - mean) * invMeanCenterNorm;
-//  snpLookupTable[m][3] = -mean * invMeanCenterNorm;
-  snpLookupTable[m][3] = 0;
+
+  // transform the input to lower case in case of sensitive
+  transform(imputeMethod.begin(), imputeMethod.end(), imputeMethod.begin(), ::tolower);
+  if (imputeMethod == "zero") {
+    snpLookupTable[m][3] = -mean * invMeanCenterNorm;
+  } else if (imputeMethod == "mean") {
+    snpLookupTable[m][3] = 0;
+  } else {
+    cout << "Warning: There is no such imputing method. Use the mean value to impute." << endl;
+    imputeMethod = "mean";
+    snpLookupTable[m][3] = 0;
+  }
 
   Meanstd[m] = std::make_pair(mean, invMeanCenterNorm);
 
@@ -184,7 +198,15 @@ void LMMCPU::invnormalizeSnps() {
     snpLookupTable[m][0] = -mean;
     snpLookupTable[m][1] = 1 - mean;
     snpLookupTable[m][2] = 2 - mean;
-    snpLookupTable[m][3] = 0;
+
+    if (imputeMethod == "zero") {
+      snpLookupTable[m][3] = -mean;
+    } else if (imputeMethod == "mean") {
+      snpLookupTable[m][3] = 0;
+    } else {
+      cout << "Warning: There is no such imputing method. Use the mean value to impute." << endl;
+      snpLookupTable[m][3] = 0;
+    }
   }
 }
 
@@ -903,7 +925,7 @@ void LMMCPU::computePosteriorMean(const double *phenoType) {
   scalVec(phenoData, sigma2g, Npad); // scale the result of conjugate gradient (refer to the document)
 
   // compute mu = X^TA, where A is a vector
-  posteriorMean.reserve(M);
+  posteriorMean.resize(M);
   multXTmatrix(posteriorMean.data(), phenoData, 1);
 
   for (uint64 m = 0; m < M; m++) {
@@ -1030,9 +1052,15 @@ void LMMCPU::buildPredictSnpsLookupTable(uint64 m,
   predictionSnpLookupTable[m][0] = 0;
   predictionSnpLookupTable[m][1] = 1;
   predictionSnpLookupTable[m][2] = 2;
-//        predictionSnpLookupTable[m][3] = 0;
-  predictionSnpLookupTable[m][3] = mean;
 
+  if (imputeMethod == "zero") {
+    predictionSnpLookupTable[m][3] = mean;
+  } else if (imputeMethod == "mean") {
+    predictionSnpLookupTable[m][3] = 0;
+  } else {
+    cout << "Warning: There is no such imputing method. Use the mean value to impute." << endl;
+    predictionSnpLookupTable[m][3] = mean;
+  }
 }
 
 void LMMCPU::predictRandomEff(uint64 numPredict,
