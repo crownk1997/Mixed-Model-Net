@@ -2,10 +2,16 @@ cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 
 project(MMNET LANGUAGES CXX)
 
+# set the path for the created libraries and executable files
+include(GNUInstallDirs)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR})
+
 # use the new policy to allow CMake to link target libraries from other directories
 cmake_policy(SET CMP0079 NEW)
 set(CMAKE_CXX_STANDARD 11)
-set(CMAKE_CXX_FLAGS "-o2 -msse -msse2 ${OpenMP_CXX_FLAGS}")
+set(CMAKE_CXX_FLAGS "-o2 -msse -msse2")
 
 set(Boost_USE_STATIC_LIBS ON)
 set(Boost_USE_MULTITHREADED ON)
@@ -26,11 +32,9 @@ find_package(OpenMP REQUIRED)
 
 add_subdirectory(src)
 
-include_directories(${Boost_INCLUDE_DIRS})
-
 add_executable(MMNET ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)
 
-target_link_libraries(dataIO PUBLIC ${Boost_LIBRARIES})
+target_link_libraries(dataIO PUBLIC ${Boost_LIBRARIES} OpenMP::OpenMP_CXX)
 target_link_libraries(Params PUBLIC dataIO)
 target_link_libraries(GenoData PUBLIC GenotypeBasis)
 target_link_libraries(AuxGenoData PUBLIC GenotypeBasis)
