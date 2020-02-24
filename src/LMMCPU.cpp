@@ -97,7 +97,7 @@ void LMMCPU::initialize() {
   double (*workTable)[4] = (double (*)[4]) ALIGN_ALLOCATE_MEMORY(omp_get_max_threads() * 256 * sizeof(*workTable));
   double map0129[4] = {0, 1, 2, 9};
 
-  Meanstd.reserve(M);
+  Meanstd.resize(M);
 
 #pragma omp parallel for
   for (uint64 m = 0; m < M; m++) {
@@ -151,8 +151,8 @@ uchar LMMCPU::normalizeSnps(uint64 m, double *snpVector) {
   if (numGenoNonMissing == 0) return 0;
 
   // mean-center and replace missing values with mean (centered to 0)
-//        double mean = sumGenoNonMissing / numGenoNonMissing;
-  double mean = sumGenoNonMissing / Nused;
+  double mean = sumGenoNonMissing / numGenoNonMissing;
+//  double mean = sumGenoNonMissing / Nused;
   for (uint64 n = 0; n < Npad; n++) {
     if (maskIndivs[n]) {
       if (snpVector[n] == 9)
@@ -733,7 +733,12 @@ void LMMCPU::estimateFixEff(const double *Pheno, bool useApproximate) {
     calConjugateWithoutMask(conjugateResultFixEff, inputMatrix, batchsize); // get two parts conjugate gradient result
   } else {
     // use the approximate fix effect to boost the performance
+//    cout << endl << "Solve conjugate gradient in estimating fix effect " << endl;
+//    double* oinvy = ALIGN_ALLOCATE_DOUBLES(Npad);
+//    calConjugateWithoutMask(oinvy, Pheno, 1);
     memcpy(conjugateResultFixEff, inputMatrix, Npad * batchsize * sizeof(double));
+//    memcpy(conjugateResultFixEff + covarBasis.getC() * Npad, oinvy, Npad * sizeof(double));
+//    ALIGN_FREE(oinvy);
   }
 
   // compute Z^Tomegia^-1Z
@@ -792,10 +797,10 @@ void LMMCPU::multXXTConjugateWithoutMask(double *out, const double *matrix, unsi
 
   multXmatrix(out, XtransMatrix, batchsize); // compute XX^TY
 
-  double invM = sigma2g / (double) M;
+  double invM = sigma2g / static_cast<double>(M);
   for (uint64 numbatch = 0, m = 0; numbatch < batchsize; numbatch++) {
     for (uint64 n = 0; n < Npad; n++, m++)
-      out[m] = invM * out[m] + sigma2e * matrix[m];
+      out[m] = out[m] * invM + sigma2e * matrix[m];
   }
 
   ALIGN_FREE(XtransMatrix);
@@ -823,6 +828,8 @@ void LMMCPU::calConjugateWithoutMask(double *Viny, const double *inputMatrix, in
   Timer timer1;
   int maxIteration = 100; // Usually, the conjugate gradient converges within 100 iterations
 
+  cout << "original r " << sqrt(rsoldOrigin[0]) << endl;
+
   for (int iter = 0; iter < maxIteration; iter++) {
 
     // compute XX^T * P * sigma2g / M + sigma2e * I * p
@@ -836,6 +843,7 @@ void LMMCPU::calConjugateWithoutMask(double *Viny, const double *inputMatrix, in
       double *Vp_temp = VmultCovCompVecs + numbatch * Npad;
 
       double alpha = rsold[numbatch] / NumericUtils::dot(p_temp, Vp_temp, Npad);
+      cout << "Alpha " << alpha << endl;
       for (uint64 n = 0; n < Npad; n++, m++) {
         Viny[m] += alpha * p[m];
         r[m] -= alpha * VmultCovCompVecs[m];
@@ -867,6 +875,7 @@ void LMMCPU::calConjugateWithoutMask(double *Viny, const double *inputMatrix, in
 
     printf(" Iter: %d, time = %.2f, maxRatio = %.4f, minRatio = %.4f, convergeRatio = %.4f \n",
            iter + 1, timer.update_time(), maxRatio, minRatio, 5e-4);
+    cout << "Residual " << sqrt(rsnew[0]) << endl;
 
     if (converged) {
       cout << "Conjugate gradient reaches convergence at " << iter + 1 << " iteration" << endl;
@@ -888,40 +897,78 @@ void LMMCPU::calConjugateWithoutMask(double *Viny, const double *inputMatrix, in
 
 }
 
-void LMMCPU::computePosteriorMean(const double *phenoType) {
+void LMMCPU::computePosteriorMean(const double* pheno, bool useApproximate) {
   // note the phenotype here is original
-  // compute yhat = omega-1ZW
-  double *yhat = ALIGN_ALLOCATE_DOUBLES(Npad);
-  MKL_INT m = Npad;
-  MKL_INT n = covarBasis.getC();
-  double alpha = 1.0;
-  MKL_INT lda = m;
-  double beta = 0.0;
-  MKL_INT incx = 1;
-  MKL_INT incy = 1;
-  cblas_dgemv(CblasColMajor,
-              CblasNoTrans,
-              m,
-              n,
-              alpha,
-              conjugateResultFixEff,
-              lda,
-              fixEffect.data(),
-              incx,
-              beta,
-              yhat,
-              incy);
+  double *phenoData;
+  if (!useApproximate) {
+    // compute yhat = omega-1ZW
+    cout << endl << "compute posterior by exact way" << endl;
+    double *yhat = ALIGN_ALLOCATE_DOUBLES(Npad);
+    MKL_INT m = Npad;
+    MKL_INT n = covarBasis.getC();
+    double alpha = 1.0;
+    MKL_INT lda = m;
+    double beta = 0.0;
+    MKL_INT incx = 1;
+    MKL_INT incy = 1;
+    cblas_dgemv(CblasColMajor,
+                CblasNoTrans,
+                m,
+                n,
+                alpha,
+                conjugateResultFixEff,
+                lda,
+                fixEffect.data(),
+                incx,
+                beta,
+                yhat,
+                incy);
 
-  // compute omega-1y - yhat
-  double *omegaInvy = conjugateResultFixEff + covarBasis.getC() * Npad;
-  double *phenoData = ALIGN_ALLOCATE_DOUBLES(Npad);
+    // compute omega-1y - yhat
+    double *omegaInvy = conjugateResultFixEff + covarBasis.getC() * Npad;
+    phenoData = ALIGN_ALLOCATE_DOUBLES(Npad);
 
-  for (uint64 n = 0; n < Npad; n++) {
-    phenoData[n] = omegaInvy[n] - yhat[n];
+    for (uint64 n = 0; n < Npad; n++) {
+      phenoData[n] = omegaInvy[n] - yhat[n];
+    }
+    ALIGN_FREE(yhat);
+  } else {
+    cout << endl << "compute posterior by approximate way " << endl;
+    // compute Zw_hat
+    double *zw_hat = ALIGN_ALLOCATE_DOUBLES(Npad);
+    MKL_INT m = Npad;
+    MKL_INT n = covarBasis.getC();
+    double alpha = 1.0;
+    MKL_INT lda = m;
+    double beta = 0.0;
+    MKL_INT incx = 1;
+    MKL_INT incy = 1;
+    cblas_dgemv(CblasColMajor,
+                CblasNoTrans,
+                m,
+                n,
+                alpha,
+                covarBasis.getCovarMatrix(),
+                lda,
+                fixEffect.data(),
+                incx,
+                beta,
+                zw_hat,
+                incy);
+
+    // pheno vector reduce the zw_hat
+    for (uint64 n = 0; n < Npad; n++) {
+      zw_hat[n] = pheno[n] - zw_hat[n];
+    }
+
+    // solve a single conjugate gradient vector
+    phenoData = ALIGN_ALLOCATE_DOUBLES(Npad);
+    memset(phenoData, 0, Npad * sizeof(double));
+    calConjugateWithoutMask(phenoData, zw_hat, 1);
+    ALIGN_FREE(zw_hat);
   }
 
   // solve single conjugate gradient get result A
-
   scalVec(phenoData, sigma2g, Npad); // scale the result of conjugate gradient (refer to the document)
 
   // compute mu = X^TA, where A is a vector
@@ -956,7 +1003,6 @@ void LMMCPU::computePosteriorMean(const double *phenoType) {
   fout.close();
 
   ALIGN_FREE(conjugateResultFixEff);
-  ALIGN_FREE(yhat);
   ALIGN_FREE(phenoData);
 }
 
@@ -1011,7 +1057,7 @@ void LMMCPU::predict(double *output, const GenoData &predictData, const CovarBas
   std::string predictHeight = outputFile + "_predict.txt";
   fout.open(predictHeight);
   fout << "Prediction (rand effect)" << "\t" << "Prediction (rand + fix effect)" << "\n";
-  for (uint64 n = 0; n < numPredict; n++) {
+  for (uint64 n = 0; n < predictData.getNused(); n++) {
     fout << predictedRandomEff[n] << "\t" << output[n] << endl;
   }
   fout.close();
