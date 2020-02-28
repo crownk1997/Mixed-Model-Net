@@ -102,6 +102,7 @@ class GeneticCorr {
   void multXXT(double *out, const double *vec, const char whichGenotype) const;
   void multXXTTrace(double *out, const double *vec, const char whichData) const; // moment estimate for the trace
   void calTraceMoM(double &kv, double &kvkv, const char whichData);
+  double calStandError(const double *projectPheno, const double kvkv, const char whichData) const;
 
   // estimate correlation
   void multXXTAux(double *out, const double *vec) const;

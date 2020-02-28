@@ -50,6 +50,7 @@ class CovarBasis : public dataBasis<T> {
 
   uint64 getC() const;
   const double *getCovarMatrix() const;
+  void writeMask(std::vector<double>& maskIndiv) const;
 };
 }
 

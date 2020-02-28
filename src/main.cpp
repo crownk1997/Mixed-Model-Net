@@ -94,7 +94,13 @@ int main(int argc, char **argv) {
 
   // read covariate data from files if provided
   CovarBasis<GenoData> covarBasis(params.covarFile, genoData, params.covarCols, maskIndivs);
+  covarBasis.writeMask(maskIndivs);
+  // update the phenotype value with new mask
+  for (uint64 n = 0; n < phenodbl[0].size(); n++) {
+    phenodbl[0][n] *= maskIndivs[n];
+  }
   covarBasis.projectCovarsVec(phenodbl[0].data());
+
 
   cout << "Time for reading and processing covariate and phenotype data " << timer.update_time() << " esc" << endl;
 
@@ -219,7 +225,7 @@ int main(int argc, char **argv) {
     cout << "Timer for estimating fix effect " << timer.update_time() << " esc" << endl;
 
     cout << endl << "***** Compute the posterior mean *****" << endl << endl;
-    lmmcpu.computePosteriorMean(phenodblorigin[0].data());
+    lmmcpu.computePosteriorMean(phenodblorigin[0].data(), params.useApproFixEffect);
 
     cout << "Timer for computing posterior mean " << timer.update_time() << " esc" << endl;
 

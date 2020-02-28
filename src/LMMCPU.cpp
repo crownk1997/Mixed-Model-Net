@@ -76,7 +76,7 @@ void LMMCPU::initialize() {
   M = genoData.getM();
   Npad = genoData.getNpad();
 
-  // get the value of Nused based on the maskIndivs
+  // get the value of Nused based on the new maskIndivs
   Nused = 0;
   for (uint64 n = 0; n < Npad; n++) {
     Nused += maskIndivs[n];
@@ -152,7 +152,7 @@ uchar LMMCPU::normalizeSnps(uint64 m, double *snpVector) {
 
   // mean-center and replace missing values with mean (centered to 0)
   double mean = sumGenoNonMissing / numGenoNonMissing;
-//  double mean = sumGenoNonMissing / Nused;
+
   for (uint64 n = 0; n < Npad; n++) {
     if (maskIndivs[n]) {
       if (snpVector[n] == 9)
@@ -165,7 +165,7 @@ uchar LMMCPU::normalizeSnps(uint64 m, double *snpVector) {
 
   double meanCenterNorm2 = NumericUtils::norm2(snpVector, Npad);
   // normalize to Nused-1 (dimensionality of subspace with all-1s vector projected out)
-  double invMeanCenterNorm = sqrt((Nused - 1) / meanCenterNorm2);
+  double invMeanCenterNorm = sqrt(static_cast<double>(Nused - 1) / meanCenterNorm2);
 
   // save lookup of 0129 values: 0, 1/meanCenterNorm, 2/meanCenterNorm, mean/meanCenterNorm
   snpLookupTable[m][0] = -mean * invMeanCenterNorm;
@@ -362,13 +362,13 @@ void LMMCPU::multXXTTrace(double *out, const double *vec) const {
 void LMMCPU::calTraceMoM(double &kv, double &kvkv) const {
   // sample gaussian vector
   Timer timer;
-  boost::mt19937 rng; // I don't seed it on purpouse
+  boost::mt19937 rng; // I don't set it on purpouse
   boost::normal_distribution<> nd(0.0, 1.0);
   boost::variate_generator<boost::mt19937 &, boost::normal_distribution<> > var_nor(rng, nd);
 
   uint64 numGaussian = estIteration * Npad;
-  double *gaussianVec = ALIGN_ALLOCATE_DOUBLES(numGaussian);
-  double *result = ALIGN_ALLOCATE_DOUBLES(estIteration * Npad);
+  auto *gaussianVec = ALIGN_ALLOCATE_DOUBLES(numGaussian);
+  auto *result = ALIGN_ALLOCATE_DOUBLES(estIteration * Npad);
   memset(result, 0, estIteration * Npad * sizeof(double));
 
   for (uint n = 0; n < numGaussian; n++) {
@@ -420,7 +420,7 @@ void LMMCPU::calTraceExact(double &kv, double &kvkv) const {
   kv = tracek / M;
 
   // compute tracek2
-  kvkv = dotVec(XXT, XXT, Npad * Npad) / (M * M);
+  kvkv = dotVec(XXT, XXT, Npad * Npad) / static_cast<double>(M * M);
 
 #ifdef DEBUG
   cout << "Calculate exact trace kvkv " << kvkv << endl;
@@ -431,7 +431,6 @@ void LMMCPU::calTraceExact(double &kv, double &kvkv) const {
 
 double LMMCPU::calStandError(const double *projectPheno, const double kvkv) const {
   // compute the first part stand error
-
   // compute (K-I)Y
   double *tempVec = ALIGN_ALLOCATE_DOUBLES(Npad);
   multXXT(tempVec, projectPheno);
@@ -460,8 +459,11 @@ double LMMCPU::calStandError(const double *projectPheno, const double kvkv) cons
   double error2 = (1 / static_cast<double>(estIteration)) * sigma2g * sigma2g * kvkv;
 
   // final stand error
-  double standerror = (1 / static_cast<double>(kvkv - Nused)) * sqrt(error1 + error2);
+  double standerror = (1 / (kvkv - static_cast<double>(Nused - covarBasis.getC() - 1))) * sqrt(error1 + error2);
 
+  cout << "number covariates in file " << covarBasis.getC() << endl;
+  cout << "error 1 " << error1 << " error 2 " << error2 << endl;
+  cout << "trace k^2 " << kvkv << " Nused " << Nused << endl;
   return standerror;
 }
 
@@ -828,7 +830,7 @@ void LMMCPU::calConjugateWithoutMask(double *Viny, const double *inputMatrix, in
   Timer timer1;
   int maxIteration = 100; // Usually, the conjugate gradient converges within 100 iterations
 
-  cout << "original r " << sqrt(rsoldOrigin[0]) << endl;
+//  cout << "original r " << sqrt(rsoldOrigin[0]) << endl;
 
   for (int iter = 0; iter < maxIteration; iter++) {
 
@@ -843,7 +845,7 @@ void LMMCPU::calConjugateWithoutMask(double *Viny, const double *inputMatrix, in
       double *Vp_temp = VmultCovCompVecs + numbatch * Npad;
 
       double alpha = rsold[numbatch] / NumericUtils::dot(p_temp, Vp_temp, Npad);
-      cout << "Alpha " << alpha << endl;
+//      cout << "Alpha " << alpha << endl;
       for (uint64 n = 0; n < Npad; n++, m++) {
         Viny[m] += alpha * p[m];
         r[m] -= alpha * VmultCovCompVecs[m];
@@ -875,7 +877,7 @@ void LMMCPU::calConjugateWithoutMask(double *Viny, const double *inputMatrix, in
 
     printf(" Iter: %d, time = %.2f, maxRatio = %.4f, minRatio = %.4f, convergeRatio = %.4f \n",
            iter + 1, timer.update_time(), maxRatio, minRatio, 5e-4);
-    cout << "Residual " << sqrt(rsnew[0]) << endl;
+//    cout << "Residual " << sqrt(rsnew[0]) << endl;
 
     if (converged) {
       cout << "Conjugate gradient reaches convergence at " << iter + 1 << " iteration" << endl;
@@ -1214,9 +1216,15 @@ void LMMCPU::calHeritability(const double *projectPheno) {
     calTraceExact(kv, kvkv);
   }
 
-  sigma2g = (yvkvy * (Nused - covarBasis.getC()) - yvy * kv) / ((Nused - covarBasis.getC()) * kvkv - kv * kv);
-  sigma2e = (yvy - kv * sigma2g) / (Nused - covarBasis.getC());
+  auto temp = static_cast<double>(Nused - covarBasis.getC());
+  // the solution we slove the liner equation directly
+  double sigma2g1 = (yvkvy * temp - yvy * kv) / (temp * kvkv - kv * kv);
 
+  // directly use the paper deduction result
+  sigma2g = (yvkvy - yvy) / (kvkv - Nused);
+  sigma2e = (yvy - kv * sigma2g) / temp;
+
+  cout << "sigma2g1" << sigma2g1 << endl;
   cout << "sigma2g " << sigma2g << endl;
   cout << "sigma2e " << sigma2e << endl;
 

@@ -81,6 +81,7 @@ void CovarBasis<T>::initialize(const std::vector<std::string> &covarCols) {
   this->data_str[0] = vector<string>(this->ncols, "1");
 
   std::set<uint64> indivsSeen;
+  std::vector<double> maskForCov(this->genoData.getNpad(), 0.);
 
   if (!this->filePath.empty()) {
     string line, FID, IID;
@@ -100,6 +101,7 @@ void CovarBasis<T>::initialize(const std::vector<std::string> &covarCols) {
           cerr << "WARNING: Duplicate entry for indiv FID=" << FID << ", IID=" << IID << endl;
         } else indivsSeen.insert(n);
 
+        maskForCov[n] = 1.; // update the mask for covariate file
         string covarValue;
         vector<string> covars;
         while (iss >> covarValue) covars.push_back(covarValue);
@@ -120,8 +122,8 @@ void CovarBasis<T>::initialize(const std::vector<std::string> &covarCols) {
 
     // check if there is missing individual in covariate file
     if (numLines != Nused) {
-      cerr << "Error: there is missing individual in covariate data" << endl;
-      exit(1);
+      cout << "WARNING: there are missing "<< Nused - numLines << " individuals in covariate file" << endl;
+      cout << "Finally, there are " << numLines << " individuals in analysis" << endl;
     }
   }
 
@@ -172,16 +174,6 @@ void CovarBasis<T>::initialize(const std::vector<std::string> &covarCols) {
     }
   }
 
-  FileUtils::SafeOfstream fout;
-  fout.open("./covar.txt");
-  for (uint64 n = 0; n < Npad; n++) {
-    for (int c = 0; c < C; c++) {
-      fout << covarMatirx[c * Npad + n] << "\t";
-    }
-    fout << "\n";
-  }
-  fout.close();
-
   // set the padding part of covarmatrix to zeros
   for (uint64 n = Nused; n < Npad; n++) {
     for (uint64 col = 0; col < C; col++) {
@@ -189,7 +181,12 @@ void CovarBasis<T>::initialize(const std::vector<std::string> &covarCols) {
     }
   }
 
-  // deal with the missing individual case
+  // update the final mask according to the covariate file mask
+  for (uint64 n = 0; n < Npad; n++) {
+    maskIndivs[n] *= maskForCov[n];
+  }
+
+  // deal with the missing individual and missing covariate cases
   for (uint64 n = 0; n < Npad; n++) {
     if (!maskIndivs[n]) {
       for (uint64 c = 0; c < C; c++) {
@@ -197,6 +194,7 @@ void CovarBasis<T>::initialize(const std::vector<std::string> &covarCols) {
       }
     }
   }
+
   // precompute WTW
   computeWTW();
 }
@@ -283,6 +281,15 @@ uint64 CovarBasis<T>::getC() const {
 template<typename T>
 const double *CovarBasis<T>::getCovarMatrix() const {
   return covarMatirx;
+}
+
+template<typename T>
+void CovarBasis<T>::writeMask(std::vector<double>& maskIndiv) const {
+  assert(maskIndiv.size() == this->maskIndivs.size()); // mask vector should have the same length
+  uint64 length = maskIndiv.size();
+  for (uint64 n = 0; n < length; n++) {
+    maskIndiv[n] *= this->maskIndivs[n];
+  }
 }
 
 }

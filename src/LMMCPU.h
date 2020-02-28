@@ -139,7 +139,7 @@ class LMMCPU {
   void calCalibrationFactor(const double *projectPheno, bool sampleCalibrationFactor);
   void computeStatistics(std::string &outputFile) const;
   void estimateFixEff(const double *projectPheno, bool useApproximate);
-  void computePosteriorMean(const double *phenoType);
+  void computePosteriorMean(const double* pheno, bool useApproximate);
   void predict(double *output, const GenoData &predictData, const CovarBasis<GenoData> &predictCov) const;
 };
 }

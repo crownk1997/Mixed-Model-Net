@@ -385,22 +385,30 @@ void GeneticCorr::compVCM(const double *genoProjecPheno, const double *auxProjec
   double yvy = NumericUtils::dot(genoProjecPheno, genoProjecPheno, NpadGeno);
   double yvkvy = calyVKVy(genoProjecPheno, NpadGeno, 'G'); // the third argument G means the main genotype data
 
+#if DEBUG
   cout << "yvy " << yvy << endl;
   cout << "yvkvy " << yvkvy << endl;
+#endif
 
   double kv, kvkv;
 
   calTraceMoM(kv, kvkv, 'G');
 
+#if DEBUG
   cout << "kv is " << kv << endl;
   cout << "kvkv is " << kvkv << endl;
+#endif
 
-  sigma2g = (yvkvy * (NusedGeno - covarBasis.getC()) - yvy * kv) / ((NusedGeno - covarBasis.getC()) * kvkv - kv * kv);
-  sigma2e = (yvy - kv * sigma2g) / (NusedGeno - covarBasis.getC());
+  auto temp1 = static_cast<double>(NusedGeno - covarBasis.getC());
+  sigma2g = (yvkvy * temp1 - yvy * kv) / (temp1 * kvkv - kv * kv);
+  sigma2e = (yvy - kv * sigma2g) / temp1;
+
+  double standardErrorGeno = calStandError(genoProjecPheno, kvkv, 'G');
 
   cout << "sigma2g " << sigma2g << endl;
   cout << "sigma2e " << sigma2e << endl;
   cout << "heritability is " << sigma2g / (sigma2e + sigma2g) << endl;
+  cout << "standard error is " << standardErrorGeno << endl;
 
   cout << "Timer for computing variance component of main dataset is " << timer.update_time() << " sec" << endl;
 
@@ -409,21 +417,26 @@ void GeneticCorr::compVCM(const double *genoProjecPheno, const double *auxProjec
   yvy = NumericUtils::dot(auxProjectPheno, auxProjectPheno, Npadaux);
   yvkvy = calyVKVy(auxProjectPheno, Npadaux, 'A');
 
+#if DEBUG
   cout << "yvy " << yvy << endl;
   cout << "yvkvy " << yvkvy << endl;
+#endif
 
   calTraceMoM(kv, kvkv, 'A');
-
+#if DEBUG
   cout << "kv is " << kv << endl;
   cout << "kvkv is " << kvkv << endl;
+#endif
 
-  auxsigma2g =
-      (yvkvy * (Nusedaux - auxcovarBasis.getC()) - yvy * kv) / ((Nusedaux - auxcovarBasis.getC()) * kvkv - kv * kv);
-  auxsigma2e = (yvy - kv * auxsigma2g) / (Nusedaux - auxcovarBasis.getC());
+  auto temp2 = static_cast<double>(Nusedaux - auxcovarBasis.getC());
+  auxsigma2g = (yvkvy * temp2 - yvy * kv) / (temp2 * kvkv - kv * kv);
+  auxsigma2e = (yvy - kv * auxsigma2g) / temp2;
+  double standardErrorAux = calStandError(auxProjectPheno, kvkv, 'A');
 
   cout << "sigma2g " << auxsigma2g << endl;
   cout << "sigma2e " << auxsigma2e << endl;
   cout << "heritability is " << auxsigma2g / (auxsigma2e + auxsigma2g) << endl;
+  cout << "standard error is " << standardErrorAux << endl;
 
   cout << "Timer for computing variance component of auxiliary dataset is " << timer.update_time() << " sec" << endl;
 
@@ -657,6 +670,61 @@ void GeneticCorr::calTraceMoM(double &kv, double &kvkv, const char whichData) {
   cout << "Calculate MoM trace kvkv " << kvkv << endl;
   cout << "Calculate MoM trace kv " << kv << endl;
 #endif
+}
+
+double GeneticCorr::calStandError(const double *projectPheno, const double kvkv, const char whichData) const {
+  // set the parameters for different datasets
+  uint64 Npad, Nused, C;
+  double _sigma2g, _sigma2e;
+  if (whichData == 'G') {
+    Npad = NpadGeno;
+    Nused = NusedGeno;
+    _sigma2g = sigma2g;
+    _sigma2e = sigma2e;
+    C = covarBasis.getC();
+  } else {
+    Npad = Npadaux;
+    Nused = Nusedaux;
+    _sigma2g = auxsigma2g;
+    _sigma2e = auxsigma2e;
+    C = auxcovarBasis.getC();
+  }
+
+  // compute the first part stand error
+  // compute (K-I)Y
+  double *tempVec = ALIGN_ALLOCATE_DOUBLES(Npad);
+  multXXT(tempVec, projectPheno, whichData);
+  NumericUtils::scaleElem(tempVec, 1 / static_cast<double>(M), Npad);
+  NumericUtils::subElem(tempVec, projectPheno, Npad);
+
+  // compute V(K-I)Y
+  double *tempVec2 = ALIGN_ALLOCATE_DOUBLES(Npad);
+  multXXT(tempVec2, tempVec, whichData);
+  NumericUtils::scaleElem(tempVec2, _sigma2g / static_cast<double>(M), Npad);
+  NumericUtils::scaleElem(tempVec, _sigma2e, Npad);
+  NumericUtils::sumElem(tempVec2, tempVec, Npad);
+
+  // compute (K-I)V(K-I)Y
+  double *tempVec3 = ALIGN_ALLOCATE_DOUBLES(Npad);
+  multXXT(tempVec3, tempVec2, whichData);
+  NumericUtils::scaleElem(tempVec3, 1 / static_cast<double>(M), Npad);
+  NumericUtils::subElem(tempVec3, tempVec2, Npad);
+  double error1 = 2 * NumericUtils::dot(tempVec3, projectPheno, Npad);
+
+  ALIGN_FREE(tempVec);
+  ALIGN_FREE(tempVec2);
+  ALIGN_FREE(tempVec3);
+
+  // compute the second part stand error
+  double error2 = (1 / static_cast<double>(estIteration)) * _sigma2g * _sigma2g * kvkv;
+
+  // final stand error
+  double standerror = (1 / (kvkv - static_cast<double>(Nused - C - 1))) * sqrt(error1 + error2);
+
+//  cout << "number covariates in file " << covarBasis.getC() << endl;
+  cout << "error 1 " << error1 << " error 2 " << error2 << endl;
+  cout << "trace k^2 " << kvkv << " Nused " << Nused << endl;
+  return standerror;
 }
 
 void GeneticCorr::estFixEff(const double *mainGenoPheno, const double *auxGenoPheno, bool useApproximate) {

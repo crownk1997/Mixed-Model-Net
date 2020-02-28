@@ -83,4 +83,5 @@ double dataBasis<T>::getEntryDbl(uint64 r, uint64 c) const {
   return parseDouble(data_str[r][c]);
 }
 
+
 }
