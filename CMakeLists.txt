@@ -11,7 +11,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR})
 # use the new policy to allow CMake to link target libraries from other directories
 cmake_policy(SET CMP0079 NEW)
 set(CMAKE_CXX_STANDARD 11)
-set(CMAKE_CXX_FLAGS "-o2 -msse -msse2")
+set(CMAKE_CXX_FLAGS "-o2 -msse -msse2 -fopenmp")
 
 set(Boost_USE_STATIC_LIBS ON)
 set(Boost_USE_MULTITHREADED ON)

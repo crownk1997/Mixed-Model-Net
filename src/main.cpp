@@ -45,6 +45,22 @@ using namespace std;
 
 int main(int argc, char **argv) {
 
+  cout << "                      +-----------------------------+" << endl;
+  cout << "                      |                         ___ |" << endl;
+  cout << "                      |   MMNET, pre-released  /_ / |" << endl;
+  cout << "                      |   March 1, 2020        /_/  |" << endl;
+  cout << "                      |   Shunkang Zhang       //   |" << endl;
+  cout << "                      |                        /    |" << endl;
+  cout << "                      +-----------------------------+" << endl;
+  cout << endl;
+
+  // output arguments
+  cout << "The input arguments are :" << "\n";
+  for (int num = 1; num < argc; num++) {
+    cout << argv[num++] << " " << argv[num] << "\n";
+  }
+  cout << endl;
+
   Timer timer;
   double start_time = timer.get_time();
 #ifdef DEBUG

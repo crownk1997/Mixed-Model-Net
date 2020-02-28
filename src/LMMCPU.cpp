@@ -1218,13 +1218,9 @@ void LMMCPU::calHeritability(const double *projectPheno) {
 
   auto temp = static_cast<double>(Nused - covarBasis.getC());
   // the solution we slove the liner equation directly
-  double sigma2g1 = (yvkvy * temp - yvy * kv) / (temp * kvkv - kv * kv);
-
-  // directly use the paper deduction result
-  sigma2g = (yvkvy - yvy) / (kvkv - Nused);
+  sigma2g = (yvkvy * temp - yvy * kv) / (temp * kvkv - kv * kv);
   sigma2e = (yvy - kv * sigma2g) / temp;
 
-  cout << "sigma2g1" << sigma2g1 << endl;
   cout << "sigma2g " << sigma2g << endl;
   cout << "sigma2e " << sigma2e << endl;
 

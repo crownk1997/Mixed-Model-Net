@@ -138,7 +138,7 @@ void CovarBasis<T>::initialize(const std::vector<std::string> &covarCols) {
       covarMatirx[n] = 1;
     }
     int totalRows = this->rowNames.size() - 1;
-    for (int row = 0; row < totalRows; row++) {
+    for (int row = 0; row < totalRows - 1; row++) {
       bool found = false;
       for (int col = 0; col < covarCols.size(); col++)
         if (this->rowNames[row + 1] == covarCols[col]) {
