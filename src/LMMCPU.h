@@ -89,7 +89,7 @@ class LMMCPU {
   void multXXTTrace(double *out, const double *vec) const; // moment estimate for the trace
   void calTraceMoM(double &kv, double &kvkv) const;
   void calTraceExact(double &kv, double &kvkv) const;
-  double calStandError(const double *projectPheno, const double kvkv) const;
+  double calStandError(const double *projectPheno, double kv, double kvkv) const;
 
   // compute the association test statistics
   void makeConjugateMask(uchar *mask); // make masks for the leave out strategy

@@ -31,6 +31,8 @@
 #include <gsl/gsl_statistics.h>
 #include <gsl/gsl_cdf.h>
 
+#include <Eigen/Dense>
+
 #include "omp.h"
 
 #include "MemoryUtils.h"
@@ -429,43 +431,125 @@ void LMMCPU::calTraceExact(double &kv, double &kvkv) const {
 
 }
 
-double LMMCPU::calStandError(const double *projectPheno, const double kvkv) const {
-  // compute the first part stand error
-  // compute (K-I)Y
-  double *tempVec = ALIGN_ALLOCATE_DOUBLES(Npad);
-  multXXT(tempVec, projectPheno);
-  NumericUtils::scaleElem(tempVec, 1 / static_cast<double>(M), Npad);
-  NumericUtils::subElem(tempVec, projectPheno, Npad);
+double LMMCPU::calStandError(const double *projectPheno, double kv, double kvkv) const {
+  // compute inverse S matrix column major
+  double S[4] = {kvkv, kv, kv, static_cast<double>(Nused - covarBasis.getC())};
 
-  // compute V(K-I)Y
-  double *tempVec2 = ALIGN_ALLOCATE_DOUBLES(Npad);
-  multXXT(tempVec2, tempVec);
-  NumericUtils::scaleElem(tempVec2, sigma2g / static_cast<double>(M), Npad);
-  NumericUtils::scaleElem(tempVec, sigma2e, Npad);
-  NumericUtils::sumElem(tempVec2, tempVec, Npad);
+  // LU decomposition
+  lapack_int n = 2;
+  lapack_int m = 2;
+  lapack_int lda = 2;
+  lapack_int ipiv[2];
+  lapack_int info = LAPACKE_dgetrf(LAPACK_COL_MAJOR, m, n, S, lda, ipiv);
 
-  // compute (K-I)V(K-I)Y
-  double *tempVec3 = ALIGN_ALLOCATE_DOUBLES(Npad);
-  multXXT(tempVec3, tempVec2);
-  NumericUtils::scaleElem(tempVec3, 1 / static_cast<double>(M), Npad);
-  NumericUtils::subElem(tempVec3, tempVec2, Npad);
-  double error1 = 2 * NumericUtils::dot(tempVec3, projectPheno, Npad);
+  if (info != 0) {
+    cerr << "Failed to compute LU decomposition " << endl;
+    cerr << "Cannot compute the inverse matrix " << endl;
+    exit(1);
+  }
 
-  ALIGN_FREE(tempVec);
-  ALIGN_FREE(tempVec2);
-  ALIGN_FREE(tempVec3);
+  // get inverse matrix
+  lapack_int info1 = LAPACKE_dgetri(LAPACK_COL_MAJOR, n, S, lda, ipiv);
 
-  // compute the second part stand error
-  double error2 = (1 / static_cast<double>(estIteration)) * sigma2g * sigma2g * kvkv;
+  if (info1 != 0) {
+    cerr << "Failed to compute LU decomposition " << endl;
+    cerr << "Cannot compute the inverse matrix " << endl;
+    exit(1);
+  }
 
-  // final stand error
-  double standerror = (1 / (kvkv - static_cast<double>(Nused - covarBasis.getC() - 1))) * sqrt(error1 + error2);
+  // compute cov of theta
+  auto* omegaY = ALIGN_ALLOCATE_DOUBLES(Npad);
 
-  cout << "number covariates in file " << covarBasis.getC() << endl;
-  cout << "error 1 " << error1 << " error 2 " << error2 << endl;
-  cout << "trace k^2 " << kvkv << " Nused " << Nused << endl;
-  return standerror;
+  multXXT(omegaY, projectPheno);
+  for (uint64 n = 0; n < Npad; n++) {
+    omegaY[n] = omegaY[n] * sigma2g / M + sigma2e * projectPheno[n];
+  }
+
+  double yTomegay = 2 * NumericUtils::dot(projectPheno, omegaY, Npad);
+
+  // compute cov diagnoal
+  auto* KVomegay = ALIGN_ALLOCATE_DOUBLES(Npad);
+
+  covarBasis.projectCovarsVec(omegaY);
+  multXXT(KVomegay, omegaY);
+  NumericUtils::scaleElem(KVomegay, static_cast<double>(1) / M, Npad);
+
+  double dig = 2 * NumericUtils::dot(projectPheno, KVomegay, Npad);
+
+  // compute first elem
+  auto* VKy = ALIGN_ALLOCATE_DOUBLES(Npad);
+  auto* omegaVKy = ALIGN_ALLOCATE_DOUBLES(Npad);
+
+  multXXT(VKy, projectPheno);
+  NumericUtils::scaleElem(VKy, static_cast<double>(1) / M, Npad);
+  covarBasis.projectCovarsVec(VKy);
+  multXXT(omegaVKy, VKy);
+  for (uint64 n = 0; n < Npad; n++) {
+    omegaVKy[n] = omegaVKy[n] * sigma2g / M + sigma2e * VKy[n];
+  }
+
+  double elem = 2 * NumericUtils::dot(VKy, omegaVKy, Npad);
+  elem += sigma2g * sigma2g * kv / estIteration;
+
+  double cov[4] = {elem, dig, dig, yTomegay};
+
+  // using eigen to compute the small scale matrix multiplication
+  // S^{-1}covS^{-1}
+  Eigen::MatrixXd Sinv(2,2);
+  Sinv << S[0], S[1],
+          S[2], S[3];
+  Eigen::MatrixXd temp(2,2);
+  temp << cov[0], cov[1],
+          cov[2], cov[3];
+  Eigen::MatrixXd covTheta = Sinv * temp * Sinv;
+
+  // deltah
+  double denominator = sigma2g * kv + sigma2e * static_cast<double>(Nused - covarBasis.getC());
+  double coeff = kv * static_cast<double>(Nused - covarBasis.getC()) / (denominator * denominator);
+  Eigen::Vector2d deltah;
+  deltah(0, 0) = coeff * sigma2g; deltah(1, 0) = coeff * (-sigma2e);
+
+  double stdHreg = sqrt(deltah.transpose() * covTheta * deltah);
+
+  return stdHreg;
 }
+//double LMMCPU::calStandError(const double *projectPheno, const double kvkv) const {
+//  // compute the first part stand error
+//  // compute (K-I)Y
+//  double *tempVec = ALIGN_ALLOCATE_DOUBLES(Npad);
+//  multXXT(tempVec, projectPheno);
+//  NumericUtils::scaleElem(tempVec, 1 / static_cast<double>(M), Npad);
+//  NumericUtils::subElem(tempVec, projectPheno, Npad);
+//
+//  // compute V(K-I)Y
+//  double *tempVec2 = ALIGN_ALLOCATE_DOUBLES(Npad);
+//  multXXT(tempVec2, tempVec);
+//  NumericUtils::scaleElem(tempVec2, sigma2g / static_cast<double>(M), Npad);
+//  NumericUtils::scaleElem(tempVec, sigma2e, Npad);
+//  NumericUtils::sumElem(tempVec2, tempVec, Npad);
+//
+//  // compute (K-I)V(K-I)Y
+//  double *tempVec3 = ALIGN_ALLOCATE_DOUBLES(Npad);
+//  multXXT(tempVec3, tempVec2);
+//  NumericUtils::scaleElem(tempVec3, 1 / static_cast<double>(M), Npad);
+//  NumericUtils::subElem(tempVec3, tempVec2, Npad);
+//  double error1 = 2 * NumericUtils::dot(tempVec3, projectPheno, Npad);
+//
+//  ALIGN_FREE(tempVec);
+//  ALIGN_FREE(tempVec2);
+//  ALIGN_FREE(tempVec3);
+//
+//  // compute the second part stand error
+//  double error2 = (1 / static_cast<double>(estIteration)) * sigma2g * sigma2g * kvkv;
+//
+//  // final stand error
+//  double standerror = (1 / (kvkv - static_cast<double>(Nused - covarBasis.getC() - 1))) * sqrt(error1 + error2);
+//
+//  cout << "number covariates in file " << covarBasis.getC() << endl;
+//  cout << "error 1 " << error1 << " error 2 " << error2 << endl;
+//  cout << "trace k^2 " << kvkv << " Nused " << Nused << endl;
+//  return standerror;
+//}
 
 void LMMCPU::makeConjugateMask(uchar *mask) {
   uchar *origin_mask = ALIGN_ALLOCATE_UCHARS(M * numChrom);
@@ -1226,8 +1310,8 @@ void LMMCPU::calHeritability(const double *projectPheno) {
 
   cout << "heritability is " << sigma2g / (sigma2e + sigma2g) << endl;
 
-  double standerror = calStandError(projectPheno, kvkv);
-  cout << "The stand error of heritability is: " << standerror << endl;
+  double stderror = calStandError(projectPheno, kv, kvkv);
+  cout << "The stand error of heritability is: " << stderror << endl;
 
 }
 
