@@ -30,6 +30,7 @@ set(MKL_LIBRARY_FLAGS "${MKL_LIBRARY_FLAGS} ${MKL_ROOT}/lib/intel64/libmkl_core.
 find_package(Boost 1.58.0 COMPONENTS program_options REQUIRED)
 find_package(OpenMP REQUIRED)
 find_package(Eigen3 3.3 REQUIRED)
+find_package(MPI REQUIRED)
 
 add_subdirectory(src)
 
@@ -40,7 +41,7 @@ target_link_libraries(Params PUBLIC dataIO)
 target_link_libraries(GenoData PUBLIC GenotypeBasis)
 target_link_libraries(AuxGenoData PUBLIC GenotypeBasis)
 target_link_libraries(GeneticCorr PUBLIC NumericUtils GenoData AuxGenoData)
-target_link_libraries(LMMCPU PUBLIC GenoData Eigen3::Eigen)
+target_link_libraries(LMMCPU PUBLIC GenoData Eigen3::Eigen MPI::MPI_CXX)
 
 list(APPEND LINK_STATIC_LIBRARIES dataIO Params Timer GenoData MemoryUtils
                                   LMMCPU NumericUtils GeneticCorr GenotypeBasis
@@ -50,3 +51,10 @@ target_link_libraries(MMNET PUBLIC ${LINK_STATIC_LIBRARIES}
                                    ${GSL_LIBRARY_PATH} 
                                    ${DL_LIBRARY_PATH}
                                    ${MKL_LIBRARY_FLAGS})
+
+add_executable(MMNET_MPI ${CMAKE_CURRENT_SOURCE_DIR}/src/testMPI.cpp)
+
+target_link_libraries(MMNET_MPI PUBLIC ${LINK_STATIC_LIBRARIES}
+									   ${MKL_LIBRARY_FLAGS}
+									   ${GSL_LIBRARY_PATH} 
+                                       ${DL_LIBRARY_PATH})

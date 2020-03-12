@@ -222,7 +222,7 @@ double LMMCPU::calyVKVy(const double *projectPheno) const {
   MKL_INT n = Npad;
   MKL_INT incx = 1;
   MKL_INT incy = 1;
-  double yvkvy = cblas_ddot(n, projectPheno, incx, temp, incy) / M;
+  double yvkvy = cblas_ddot(n, projectPheno, incx, temp, incy) / M_MPI;
 
 #ifdef DEBUG
   cout << "yvkvy result is " << yvkvy << endl;
@@ -371,6 +371,7 @@ void LMMCPU::calTraceMoM(double &kv, double &kvkv) const {
   uint64 numGaussian = estIteration * Npad;
   auto *gaussianVec = ALIGN_ALLOCATE_DOUBLES(numGaussian);
   auto *result = ALIGN_ALLOCATE_DOUBLES(estIteration * Npad);
+
   memset(result, 0, estIteration * Npad * sizeof(double));
 
   for (uint n = 0; n < numGaussian; n++) {
@@ -387,8 +388,15 @@ void LMMCPU::calTraceMoM(double &kv, double &kvkv) const {
   }
 
   // compute l2 norm
-  uint64 norm1 = estIteration * M * M;
-  uint64 norm2 = estIteration * M;
+  uint64 norm1 = estIteration * M_MPI * M_MPI;
+  uint64 norm2 = estIteration * M_MPI;
+
+  // MPI version need to tranfer data
+  // when M_MPI large than M, we use the MPI version
+  if (M_MPI > M) {
+    MPI_Barrier(MPI_COMM_WORLD);
+    MPI_Allreduce(MPI_IN_PLACE, result, estIteration*Npad, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+  }
 
   MKL_INT n = estIteration * Npad;
   MKL_INT incx = 1;
@@ -1287,6 +1295,7 @@ std::vector<uint64> LMMCPU::selectProSnps(int numCalibSnps) {
 }
 
 void LMMCPU::calHeritability(const double *projectPheno) {
+  M_MPI = M;
   double yvy = NumericUtils::dot(projectPheno, projectPheno, Npad);
   double yvkvy = calyVKVy(projectPheno);
 
@@ -1465,6 +1474,48 @@ void LMMCPU::compInverse(double *matrix, const unsigned int row) const {
     cerr << "Failed to compute inverse " << endl;
     exit(1);
   }
+}
+
+// ========== MPI interface ==========
+void LMMCPU::calHeritability_MPI(const double *projectPheno) {
+  // update M for the further use
+  MPI_Allreduce(&M, &M_MPI, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, MPI_COMM_WORLD);
+
+  double yvy = NumericUtils::dot(projectPheno, projectPheno, Npad);
+  double yvkvy_partial = calyVKVy(projectPheno);
+
+  double yvkvy;
+  // MPI ALL reduce to get the final yvkvy
+  MPI_Barrier(MPI_COMM_WORLD);
+  MPI_Allreduce(&yvkvy_partial, &yvkvy, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+
+  double kv, kvkv;
+  int id;
+  MPI_Comm_rank(MPI_COMM_WORLD, &id);
+
+  if (!useExactTrace) {
+    cout << "Calculate trace by using random algorithm" << endl;
+    calTraceMoM(kv, kvkv);
+  } else {
+    cout << "Calculate trace by using exact algorithm" << endl;
+    calTraceExact(kv, kvkv);
+  }
+
+  auto temp = static_cast<double>(Nused - covarBasis.getC());
+  // the solution we slove the liner equation directly
+  sigma2g = (yvkvy * temp - yvy * kv) / (temp * kvkv - kv * kv);
+  sigma2e = (yvy - kv * sigma2g) / temp;
+
+  if (id == 0) {
+    cout << "sigma2g " << sigma2g << endl;
+    cout << "sigma2e " << sigma2e << endl;
+
+    cout << "heritability is " << sigma2g / (sigma2e + sigma2g) << endl;
+  }
+
+//  double stderror = calStandError(projectPheno, kv, kvkv);
+//  cout << "The stand error of heritability is: " << stderror << endl;
+
 }
 }
 

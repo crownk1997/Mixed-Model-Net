@@ -21,6 +21,8 @@
 #include "GenoData.h"
 #include "CovarBasis.h"
 
+#include <mpi.h>
+
 namespace LMMNET {
 class LMMCPU {
 
@@ -32,6 +34,8 @@ class LMMCPU {
 
   uint64 M, Npad;
   uint64 Nused;
+
+  uint64 M_MPI; // total snps for MPI version
 
   int numChrom; // the number of chrom used in model for leave out strategy
   int numCalibSnps;
@@ -141,6 +145,8 @@ class LMMCPU {
   void estimateFixEff(const double *projectPheno, bool useApproximate);
   void computePosteriorMean(const double* pheno, bool useApproximate);
   void predict(double *output, const GenoData &predictData, const CovarBasis<GenoData> &predictCov) const;
+
+  void calHeritability_MPI(const double *projectPheno);
 };
 }
 #endif //LMMNET_LMMCPU_H
