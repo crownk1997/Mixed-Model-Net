@@ -73,6 +73,7 @@ int main(int argc, char** argv) {
   // According to total number of processes to split input file
   int total_files = params.bedFiles.size();
   int numbed_perprocess;
+  int start_id;
   if (total_files < total_process) {
     cerr << "Error: the number of process " << total_process << " is larger than number of bedFiles "
     << total_files << endl;
@@ -85,20 +86,22 @@ int main(int argc, char** argv) {
     cout << "Warning: input files cannot be seperated evenly " << endl;
     cout << "There might be imbalance workload among different processes" << endl;
     // compute the remainder and split task evenly
-    int zp = total_files - remainder;
+//    int zp = total_files - remainder;
     int pp = total_files / total_process;
 
-    if (id < zp) {
+    if (id < remainder) {
       numbed_perprocess = pp + 1;
+      start_id = id * numbed_perprocess;
     } else {
       numbed_perprocess = pp;
+      start_id = remainder * (pp + 1) + (id - remainder) * numbed_perprocess;
     }
   } else {
     // task can be divided evenly
     numbed_perprocess = total_files / total_process;
+    start_id = id * numbed_perprocess;
   }
 
-  auto start_id = id * numbed_perprocess;
   auto end_id = start_id + numbed_perprocess;
   const std::vector<std::string> bedFiles_PerP(&params.bedFiles[start_id], &params.bedFiles[end_id]);
   const std::vector<std::string> bimFiles_PerP(&params.bimFiles[start_id], &params.bimFiles[end_id]);
