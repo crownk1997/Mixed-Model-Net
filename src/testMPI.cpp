@@ -11,6 +11,7 @@
 
 #include <mpi.h>
 #include "omp.h"
+#include <mkl.h>
 
 #include <iostream>
 
@@ -54,6 +55,7 @@ int main(int argc, char** argv) {
   }
 
   omp_set_num_threads(params.numThreads);
+  mkl_set_num_threads(params.numThreads);
 
   if (id == 0) {
     cout << "fam: " << params.famFile << endl;
@@ -68,13 +70,32 @@ int main(int argc, char** argv) {
     cout << endl << "***** Reading genotype data *****" << endl << endl;
   }
 
-  // split bed files
-  int numbed_perprocess = static_cast<int>(params.bedFiles.size() + total_process - 1) / total_process;
-  if (numbed_perprocess == 0) {
+  // According to total number of processes to split input file
+  int total_files = params.bedFiles.size();
+  int numbed_perprocess;
+  if (total_files < total_process) {
     cerr << "Error: the number of process " << total_process << " is larger than number of bedFiles "
-    << params.bedFiles.size() << endl;
+    << total_files << endl;
     cerr << "You should use less process" << endl;
     exit(1);
+  }
+
+  int remainder = total_files % total_process;
+  if (remainder != 0) {
+    cout << "Warning: input files cannot be seperated evenly " << endl;
+    cout << "There might be imbalance workload among different processes" << endl;
+    // compute the remainder and split task evenly
+    int zp = total_files - remainder;
+    int pp = total_files / total_process;
+
+    if (id < zp) {
+      numbed_perprocess = pp + 1;
+    } else {
+      numbed_perprocess = pp;
+    }
+  } else {
+    // task can be divided evenly
+    numbed_perprocess = total_files / total_process;
   }
 
   auto start_id = id * numbed_perprocess;
@@ -82,6 +103,7 @@ int main(int argc, char** argv) {
   const std::vector<std::string> bedFiles_PerP(&params.bedFiles[start_id], &params.bedFiles[end_id]);
   const std::vector<std::string> bimFiles_PerP(&params.bimFiles[start_id], &params.bimFiles[end_id]);
 
+  
   GenoData genoData(params.famFile, bimFiles_PerP, bedFiles_PerP, params.removeSnpsFiles,
                     params.removeIndivsFiles, params.maxMissingPerSnp, params.maxMissingPerIndiv);
   const vector<SnpInfo> &snps = genoData.getSnpInfo();
@@ -122,7 +144,12 @@ int main(int argc, char** argv) {
 
   cout << "Time for initializing lmmnet object and normalizing snps is " << timer.update_time() << " sec" << endl;
 
+  cout << endl << "***** Computing heritability *****" << endl << endl;
+
   lmmcpu.calHeritability_MPI(phenodbl[0].data());
+
+  cout << "Time for computing heritability is " << timer.update_time() << " sec" << endl;
+
   MPI_Finalize();
   if (id == 0) {
     cout << "Total elapsed time for analysis = " << (timer.get_time() - start_time) << " sec"

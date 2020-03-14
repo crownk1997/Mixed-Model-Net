@@ -26,6 +26,7 @@
 #include <cctype>
 
 #include "omp.h"
+#include <mkl.h>
 
 #include "Parameters.h"
 #include "IOUtils.h"
@@ -75,6 +76,7 @@ int main(int argc, char **argv) {
 
   cout << endl << "Setting number of threads to " << params.numThreads << endl;
   omp_set_num_threads(params.numThreads);
+  mkl_set_num_threads(params.numThreads);
 
   cout << "fam: " << params.famFile << endl;
   cout << "bim(s): ";
