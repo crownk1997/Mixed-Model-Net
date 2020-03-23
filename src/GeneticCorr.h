@@ -41,6 +41,9 @@ class GeneticCorr {
 
   int snpsPerBlock;
   uint64 estIteration;
+  uint64 estIterationMain;
+  uint64 estIterationAux;
+  uint64 estIterationDelta;
 
   uchar *projMaskSnps; // two datasets must analysis the same snps
 
@@ -137,6 +140,8 @@ class GeneticCorr {
               const double *_maskauxIndivs,
               int _snpsPerBlock,
               uint64 _estIteration,
+              uint64 _estIterationAux,
+              uint64 _estIterationDelta,
               bool _useExactTrace,
               const std::string _inputeMethod,
               const std::string _outputFile);

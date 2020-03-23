@@ -63,7 +63,9 @@ class Params {
   int numCalibSnps;
   int snpsPerBlock; // split snps into small blocks to analysis
 
-  uint64 estIterationTrace; // number of iteration involved in estimating trace
+  uint64 estIterationTrace; // number of iteration involved in estimating main dataset trace
+  uint64 estIterationTraceAux; // number of iteration involved in estimating auxiliary dataset trace
+  uint64 estIterationDelta; // number of iteration involved in estimating generic correlation
   uint64 maxIterationConj; // number of max iteration in conjugate gradient
   double convergenceLevel; // convergence level of conjugate gradient
   bool useExactTrace;

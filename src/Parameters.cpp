@@ -99,6 +99,10 @@ bool Params::processCommandLineArgs(int argc, char **argv) {
       ("snpsPerBlock", value<int>(&snpsPerBlock)->default_value(64), "the number of snps per block in computation")
       ("estIteration", value<uint64>(&estIterationTrace)->default_value(10),
        "the number of sample iteration in estimating trace by mom estimator")
+      ("estIterationAux", value<uint64>(&estIterationTraceAux)->default_value(10),
+       "the number of sample iteration in estimating trace by mom estimator")
+      ("estIterationDelta", value<uint64>(&estIterationDelta)->default_value(10),
+       "the number of sample iteration in estimating trace by mom estimator")
       ("maxIterationConj", value<uint64>(&maxIterationConj)->default_value(1000),
        "the number of maxiteration in computation of conjugate gradient")
       ("convergenceLevel",
@@ -145,7 +149,7 @@ bool Params::checkArguments(boost::program_options::command_line_parser &cmd,
 
     if (vm.count("bfile")) {
       string bfile = vm["bfile"].as<string>();
-      famFile = bfile + ".fam";
+//      famFile = bfile + ".fam";
       bimFileTemplates.push_back(bfile + ".bim");
       bedFileTemplates.push_back(bfile + ".bed");
     }
@@ -166,11 +170,6 @@ bool Params::checkArguments(boost::program_options::command_line_parser &cmd,
 
     phenoUseFam = vm.count("phenoUseFam");
 
-    if (famFile.empty()) {
-      cerr << "Error: Please specifiy fam file"
-           << endl;
-      return false;
-    }
     if (bimFileTemplates.empty()) {
       cerr << "Error: Please specifiy bim file"
            << endl;
@@ -188,6 +187,17 @@ bool Params::checkArguments(boost::program_options::command_line_parser &cmd,
 
     bimFiles = analysisTemplates(bimFileTemplates);
     bedFiles = analysisTemplates(bedFileTemplates);
+    // copy and change the name
+    if (vm.count("bfile")) {
+      famFile = bimFiles[0];
+      famFile.replace(famFile.end() - 3, famFile.end(), "fam");
+    }
+
+    if (famFile.empty()) {
+      cerr << "Error: Please specifiy fam file"
+           << endl;
+      return false;
+    }
 
     if (bimFiles.size() != bedFiles.size()) {
       cerr << "Error: Numbers of bim files and bed files must match" << endl;
