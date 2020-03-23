@@ -48,6 +48,8 @@ GeneticCorr::GeneticCorr(const LMMNET::GenoData &_genoData,
                          const double *_maskauxIndivs,
                          int _snpsPerBlock,
                          uint64 _estIteration,
+                         uint64 _estIterationAux,
+                         uint64 _estIterationDelta,
                          bool _useExactTrace,
                          const std::string _imputeMethod,
                          const std::string _outputFIle) : genoData(_genoData),
@@ -57,7 +59,9 @@ GeneticCorr::GeneticCorr(const LMMNET::GenoData &_genoData,
                                                     auxcovarBasis(_auxcovarBasis),
                                                     maskauxIndivs(_maskauxIndivs),
                                                     snpsPerBlock(_snpsPerBlock),
-                                                    estIteration(_estIteration),
+                                                    estIterationMain(_estIteration),
+                                                    estIterationAux(_estIterationAux),
+                                                    estIterationDelta(_estIterationDelta),
                                                     useExactTrace(_useExactTrace),
                                                     imputeMethod(_imputeMethod),
                                                     outputFile(_outputFIle) {
@@ -582,29 +586,29 @@ double GeneticCorr::estimateDelta(const double *genoProjectPheno, const double *
   boost::normal_distribution<> nd(0.0, 1.0);
   boost::variate_generator<boost::mt19937 &, boost::normal_distribution<> > var_nor(rng, nd);
 
-  uint64 numGaussianAux = estIteration * Npadaux;
+  uint64 numGaussianAux = estIterationDelta * Npadaux;
   double *gaussianVecAux = ALIGN_ALLOCATE_DOUBLES(numGaussianAux);
-  double *result = ALIGN_ALLOCATE_DOUBLES(estIteration * NpadGeno);
-  memset(result, 0, estIteration * NpadGeno * sizeof(double));
+  double *result = ALIGN_ALLOCATE_DOUBLES(estIterationDelta * NpadGeno);
+  memset(result, 0, estIterationDelta * NpadGeno * sizeof(double));
 
   for (uint n = 0; n < numGaussianAux; n++) {
     gaussianVecAux[n] = var_nor();
   }
 
   // project covariates from X1
-  for (uint iter = 0; iter < estIteration; iter++) {
+  for (uint iter = 0; iter < estIterationDelta; iter++) {
     auxcovarBasis.projectCovarsVec(gaussianVecAux + iter * Npadaux);
   }
 
   multXXTAuxTrace(result, gaussianVecAux);
 
   // project covariates from X2
-  for (uint iter = 0; iter < estIteration; iter++) {
+  for (uint iter = 0; iter < estIterationDelta; iter++) {
     covarBasis.projectCovarsVec(result + iter * NpadGeno);
   }
 
   // compute l2 norm
-  uint64 norm1 = estIteration * M * M;
+  uint64 norm1 = estIterationDelta * M * M;
 
   MKL_INT n = estIteration * NpadGeno;
   MKL_INT incx = 1;
@@ -620,10 +624,14 @@ double GeneticCorr::estimateDelta(const double *genoProjectPheno, const double *
 
 void GeneticCorr::calTraceMoM(double &kv, double &kvkv, const char whichData) {
   uint64 Npad;
-  if (whichData == 'G')
+  if (whichData == 'G') {
     Npad = NpadGeno;
-  else
+    estIteration = estIterationMain;
+  }
+  else {
     Npad = Npadaux;
+    estIteration = estIterationAux;
+  }
 
   Timer timer;
   boost::mt19937 rng; // I don't seed it on purpouse

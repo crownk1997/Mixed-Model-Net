@@ -165,7 +165,7 @@ int main(int argc, char **argv) {
 
     GeneticCorr
         geneticCorr(genoData, covarBasis, &maskIndivs[0], auxData, auxCovBasis, &auxmaskIndivs[0], params.snpsPerBlock,
-                    params.estIterationTrace, params.useExactTrace, params.imputeMethod, params.outputFile);
+                    params.estIterationTrace, params.estIterationTraceAux, params.estIterationDelta, params.useExactTrace, params.imputeMethod, params.outputFile);
 
     cout << "Time for initializing genetic object and normalizing snps is " << timer.update_time() << " sec" << endl;
 
