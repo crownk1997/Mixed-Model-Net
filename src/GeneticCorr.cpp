@@ -27,6 +27,8 @@
 
 #include "omp.h"
 
+#include <Eigen/Dense>
+
 #include "MemoryUtils.h"
 #include "NumericUtils.h"
 #include "IOUtils.h"
@@ -407,7 +409,7 @@ void GeneticCorr::compVCM(const double *genoProjecPheno, const double *auxProjec
   sigma2g = (yvkvy * temp1 - yvy * kv) / (temp1 * kvkv - kv * kv);
   sigma2e = (yvy - kv * sigma2g) / temp1;
 
-  double standardErrorGeno = calStandError(genoProjecPheno, kvkv, 'G');
+  double standardErrorGeno = calStandError(genoProjecPheno, kv, kvkv, 'G');
 
   cout << "sigma2g " << sigma2g << endl;
   cout << "sigma2e " << sigma2e << endl;
@@ -435,7 +437,7 @@ void GeneticCorr::compVCM(const double *genoProjecPheno, const double *auxProjec
   auto temp2 = static_cast<double>(Nusedaux - auxcovarBasis.getC());
   auxsigma2g = (yvkvy * temp2 - yvy * kv) / (temp2 * kvkv - kv * kv);
   auxsigma2e = (yvy - kv * auxsigma2g) / temp2;
-  double standardErrorAux = calStandError(auxProjectPheno, kvkv, 'A');
+  double standardErrorAux = calStandError(auxProjectPheno, kv, kvkv, 'A');
 
   cout << "sigma2g " << auxsigma2g << endl;
   cout << "sigma2e " << auxsigma2e << endl;
@@ -680,7 +682,7 @@ void GeneticCorr::calTraceMoM(double &kv, double &kvkv, const char whichData) {
 #endif
 }
 
-double GeneticCorr::calStandError(const double *projectPheno, const double kvkv, const char whichData) const {
+double GeneticCorr::calStandError(const double *projectPheno, double kv, double kvkv, const char whichData) const {
   // set the parameters for different datasets
   uint64 Npad, Nused, C;
   double _sigma2g, _sigma2e;
@@ -698,41 +700,93 @@ double GeneticCorr::calStandError(const double *projectPheno, const double kvkv,
     C = auxcovarBasis.getC();
   }
 
-  // compute the first part stand error
-  // compute (K-I)Y
-  double *tempVec = ALIGN_ALLOCATE_DOUBLES(Npad);
-  multXXT(tempVec, projectPheno, whichData);
-  NumericUtils::scaleElem(tempVec, 1 / static_cast<double>(M), Npad);
-  NumericUtils::subElem(tempVec, projectPheno, Npad);
+  // compute inverse S matrix column major
+  double S[4] = {kvkv, kv, kv, static_cast<double>(Nused - C)};
 
-  // compute V(K-I)Y
-  double *tempVec2 = ALIGN_ALLOCATE_DOUBLES(Npad);
-  multXXT(tempVec2, tempVec, whichData);
-  NumericUtils::scaleElem(tempVec2, _sigma2g / static_cast<double>(M), Npad);
-  NumericUtils::scaleElem(tempVec, _sigma2e, Npad);
-  NumericUtils::sumElem(tempVec2, tempVec, Npad);
+  // LU decomposition
+  lapack_int n = 2;
+  lapack_int m = 2;
+  lapack_int lda = 2;
+  lapack_int ipiv[2];
+  lapack_int info = LAPACKE_dgetrf(LAPACK_COL_MAJOR, m, n, S, lda, ipiv);
 
-  // compute (K-I)V(K-I)Y
-  double *tempVec3 = ALIGN_ALLOCATE_DOUBLES(Npad);
-  multXXT(tempVec3, tempVec2, whichData);
-  NumericUtils::scaleElem(tempVec3, 1 / static_cast<double>(M), Npad);
-  NumericUtils::subElem(tempVec3, tempVec2, Npad);
-  double error1 = 2 * NumericUtils::dot(tempVec3, projectPheno, Npad);
+  if (info != 0) {
+    cerr << "Failed to compute LU decomposition " << endl;
+    cerr << "Cannot compute the inverse matrix " << endl;
+    exit(1);
+  }
 
-  ALIGN_FREE(tempVec);
-  ALIGN_FREE(tempVec2);
-  ALIGN_FREE(tempVec3);
+  // get inverse matrix
+  lapack_int info1 = LAPACKE_dgetri(LAPACK_COL_MAJOR, n, S, lda, ipiv);
 
-  // compute the second part stand error
-  double error2 = (1 / static_cast<double>(estIteration)) * _sigma2g * _sigma2g * kvkv;
+  if (info1 != 0) {
+    cerr << "Failed to compute LU decomposition " << endl;
+    cerr << "Cannot compute the inverse matrix " << endl;
+    exit(1);
+  }
 
-  // final stand error
-  double standerror = (1 / (kvkv - static_cast<double>(Nused - C - 1))) * sqrt(error1 + error2);
+  // compute cov of theta
+  auto* omegaY = ALIGN_ALLOCATE_DOUBLES(Npad);
 
-//  cout << "number covariates in file " << covarBasis.getC() << endl;
-  cout << "error 1 " << error1 << " error 2 " << error2 << endl;
-  cout << "trace k^2 " << kvkv << " Nused " << Nused << endl;
-  return standerror;
+  multXXT(omegaY, projectPheno, whichData);
+  for (uint64 n = 0; n < Npad; n++) {
+    omegaY[n] = omegaY[n] * _sigma2g / M + _sigma2e * projectPheno[n];
+  }
+
+  double yTomegay = 2 * NumericUtils::dot(projectPheno, omegaY, Npad);
+
+  // compute cov diagnoal
+  auto* KVomegay = ALIGN_ALLOCATE_DOUBLES(Npad);
+  if (whichData == 'G') {
+    covarBasis.projectCovarsVec(omegaY);
+  } else {
+    auxcovarBasis.projectCovarsVec(omegaY);
+  }
+  multXXT(KVomegay, omegaY, whichData);
+  NumericUtils::scaleElem(KVomegay, static_cast<double>(1) / M, Npad);
+
+  double dig = 2 * NumericUtils::dot(projectPheno, KVomegay, Npad);
+
+  // compute first elem
+  auto* VKy = ALIGN_ALLOCATE_DOUBLES(Npad);
+  auto* omegaVKy = ALIGN_ALLOCATE_DOUBLES(Npad);
+
+  multXXT(VKy, projectPheno, whichData);
+  NumericUtils::scaleElem(VKy, static_cast<double>(1) / M, Npad);
+  if (whichData == 'G') {
+    covarBasis.projectCovarsVec(VKy);
+  } else {
+    auxcovarBasis.projectCovarsVec(VKy);
+  }
+  multXXT(omegaVKy, VKy, whichData);
+  for (uint64 n = 0; n < Npad; n++) {
+    omegaVKy[n] = omegaVKy[n] * _sigma2g / M + _sigma2e * VKy[n];
+  }
+
+  double elem = 2 * NumericUtils::dot(VKy, omegaVKy, Npad);
+  elem += _sigma2g * _sigma2g * kv / estIteration;
+
+  double cov[4] = {elem, dig, dig, yTomegay};
+
+  // using eigen to compute the small scale matrix multiplication
+  // S^{-1}covS^{-1}
+  Eigen::MatrixXd Sinv(2,2);
+  Sinv << S[0], S[1],
+      S[2], S[3];
+  Eigen::MatrixXd temp(2,2);
+  temp << cov[0], cov[1],
+      cov[2], cov[3];
+  Eigen::MatrixXd covTheta = Sinv * temp * Sinv;
+
+  // deltah
+  double denominator = _sigma2g * kv + _sigma2e * static_cast<double>(Nused - C);
+  double coeff = kv * static_cast<double>(Nused - C) / (denominator * denominator);
+  Eigen::Vector2d deltah;
+  deltah(0, 0) = coeff * sigma2g; deltah(1, 0) = coeff * (-sigma2e);
+
+  double stdHreg = sqrt(deltah.transpose() * covTheta * deltah);
+
+  return stdHreg;
 }
 
 void GeneticCorr::estFixEff(const double *mainGenoPheno, const double *auxGenoPheno, bool useApproximate) {

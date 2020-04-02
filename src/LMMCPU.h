@@ -126,6 +126,10 @@ class LMMCPU {
                         const GenoData &predictData) const;
   void predictFixEff(uint64 numPredict, double *fixEff, const double *predictCovarMatrix) const;
 
+  // API for MPI version
+  void multXXTConjugateWithoutMask_MPI(double* out, const double* matrix, unsigned int batchsize);
+  void calConjugateWithoutMask_MPI(double *Viny, const double *inputVec, int batchsize);
+
  public:
   LMMCPU(const GenoData &_genoData,
          const CovarBasis<GenoData> &_covarBasis,
@@ -146,7 +150,10 @@ class LMMCPU {
   void computePosteriorMean(const double* pheno, bool useApproximate);
   void predict(double *output, const GenoData &predictData, const CovarBasis<GenoData> &predictCov) const;
 
+  // API for MPI version
   void calHeritability_MPI(const double *projectPheno);
+  void estimateFixEff_MPI(const double* Pheno, bool useApproximate);
+  void computePosteriorMean_MPI(const double* pheno, bool useApproximate);
 };
 }
 #endif //LMMNET_LMMCPU_H

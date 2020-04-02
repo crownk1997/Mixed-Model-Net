@@ -20,6 +20,7 @@
 #include <assert.h>
 #include <math.h>
 #include <cmath>
+#include <string>
 #include<bits/stdc++.h>
 
 #include <mkl.h>
@@ -827,12 +828,7 @@ void LMMCPU::estimateFixEff(const double *Pheno, bool useApproximate) {
     calConjugateWithoutMask(conjugateResultFixEff, inputMatrix, batchsize); // get two parts conjugate gradient result
   } else {
     // use the approximate fix effect to boost the performance
-//    cout << endl << "Solve conjugate gradient in estimating fix effect " << endl;
-//    double* oinvy = ALIGN_ALLOCATE_DOUBLES(Npad);
-//    calConjugateWithoutMask(oinvy, Pheno, 1);
     memcpy(conjugateResultFixEff, inputMatrix, Npad * batchsize * sizeof(double));
-//    memcpy(conjugateResultFixEff + covarBasis.getC() * Npad, oinvy, Npad * sizeof(double));
-//    ALIGN_FREE(oinvy);
   }
 
   // compute Z^Tomegia^-1Z
@@ -922,8 +918,6 @@ void LMMCPU::calConjugateWithoutMask(double *Viny, const double *inputMatrix, in
   Timer timer1;
   int maxIteration = 100; // Usually, the conjugate gradient converges within 100 iterations
 
-//  cout << "original r " << sqrt(rsoldOrigin[0]) << endl;
-
   for (int iter = 0; iter < maxIteration; iter++) {
 
     // compute XX^T * P * sigma2g / M + sigma2e * I * p
@@ -937,7 +931,6 @@ void LMMCPU::calConjugateWithoutMask(double *Viny, const double *inputMatrix, in
       double *Vp_temp = VmultCovCompVecs + numbatch * Npad;
 
       double alpha = rsold[numbatch] / NumericUtils::dot(p_temp, Vp_temp, Npad);
-//      cout << "Alpha " << alpha << endl;
       for (uint64 n = 0; n < Npad; n++, m++) {
         Viny[m] += alpha * p[m];
         r[m] -= alpha * VmultCovCompVecs[m];
@@ -969,7 +962,6 @@ void LMMCPU::calConjugateWithoutMask(double *Viny, const double *inputMatrix, in
 
     printf(" Iter: %d, time = %.2f, maxRatio = %.4f, minRatio = %.4f, convergeRatio = %.4f \n",
            iter + 1, timer.update_time(), maxRatio, minRatio, 5e-4);
-//    cout << "Residual " << sqrt(rsnew[0]) << endl;
 
     if (converged) {
       cout << "Conjugate gradient reaches convergence at " << iter + 1 << " iteration" << endl;
@@ -986,7 +978,6 @@ void LMMCPU::calConjugateWithoutMask(double *Viny, const double *inputMatrix, in
     }
 
     rsold = rsnew;
-
   }
 
 }
@@ -1486,7 +1477,6 @@ void LMMCPU::calHeritability_MPI(const double *projectPheno) {
 
   double yvkvy;
   // MPI ALL reduce to get the final yvkvy
-  MPI_Barrier(MPI_COMM_WORLD);
   MPI_Allreduce(&yvkvy_partial, &yvkvy, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
 
   double kv, kvkv;
@@ -1516,6 +1506,298 @@ void LMMCPU::calHeritability_MPI(const double *projectPheno) {
 //  double stderror = calStandError(projectPheno, kv, kvkv);
 //  cout << "The stand error of heritability is: " << stderror << endl;
 
+}
+
+void LMMCPU::multXXTConjugateWithoutMask_MPI(double *out, const double *matrix, unsigned int batchsize) {
+  double *XtransMatrix = ALIGN_ALLOCATE_DOUBLES(M * batchsize);
+
+  multXTmatrix(XtransMatrix, matrix, batchsize); // compute X^TY
+
+  multXmatrix(out, XtransMatrix, batchsize); // compute XX^TY
+
+  MPI_Allreduce(MPI_IN_PLACE, out, static_cast<int>(Npad * batchsize), MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+
+  double invM = sigma2g / static_cast<double>(M_MPI);
+  for (uint64 numbatch = 0, m = 0; numbatch < batchsize; numbatch++) {
+    for (uint64 n = 0; n < Npad; n++, m++)
+      out[m] = out[m] * invM + sigma2e * matrix[m];
+  }
+
+  ALIGN_FREE(XtransMatrix);
+}
+
+void LMMCPU::calConjugateWithoutMask_MPI(double *Viny, const double *inputMatrix, int batchsize) {
+  double *p = ALIGN_ALLOCATE_DOUBLES(Npad * batchsize); // store the batch result
+  double *r = ALIGN_ALLOCATE_DOUBLES(Npad * batchsize);
+
+  double *VmultCovCompVecs = ALIGN_ALLOCATE_DOUBLES(Npad * batchsize);
+
+  // assume x = 0, so p = r
+  memcpy(p, inputMatrix, Npad * batchsize * sizeof(inputMatrix[0]));
+  memcpy(r, inputMatrix, Npad * batchsize * sizeof(inputMatrix[0]));
+
+  // initialize the rsold to the same value for all chromsome
+  vector<double> rsold(batchsize), rsnew(batchsize);
+  for (int numbatch = 0; numbatch < batchsize; numbatch++) {
+    double *temp_p = p + numbatch * Npad;
+    rsold[numbatch] = dotVec(temp_p, temp_p, Npad);
+  }
+  vector<double> rsoldOrigin = rsold;
+
+  Timer timer;
+  Timer timer1;
+  int maxIteration = 100; // Usually, the conjugate gradient converges within 100 iterations
+
+  for (int iter = 0; iter < maxIteration; iter++) {
+    // compute XX^T * P * sigma2g / M + sigma2e * I * p
+    timer1.update_time();
+
+    multXXTConjugateWithoutMask_MPI(VmultCovCompVecs, p, batchsize);
+
+    // todo: multithreading to this section of code
+    for (uint64 numbatch = 0, m = 0; numbatch < batchsize; numbatch++) {
+      double *p_temp = p + numbatch * Npad;
+      double *Vp_temp = VmultCovCompVecs + numbatch * Npad;
+
+      double alpha = rsold[numbatch] / NumericUtils::dot(p_temp, Vp_temp, Npad);
+      for (uint64 n = 0; n < Npad; n++, m++) {
+        Viny[m] += alpha * p[m];
+        r[m] -= alpha * VmultCovCompVecs[m];
+      }
+    }
+
+    // compute rsnew for each batch
+    for (uint64 numbatch = 0; numbatch < batchsize; numbatch++) {
+      double *r_temp = r + numbatch * Npad;
+      rsnew[numbatch] = NumericUtils::norm2(r_temp, Npad);
+    }
+
+    // check convergence condition
+    bool converged = true;
+    for (int numbatch = 0; numbatch < batchsize; numbatch++) {
+      if (sqrt(rsnew[numbatch] / rsoldOrigin[numbatch]) > 5e-4) {
+        converged = false;
+      }
+    }
+
+    // output intermediate result
+    double maxRatio = 0;
+    double minRatio = 1e9;
+    for (int numbatch = 0; numbatch < batchsize; numbatch++) {
+      double currRatio = sqrt(rsnew[numbatch] / rsoldOrigin[numbatch]);
+      maxRatio = std::max(maxRatio, currRatio);
+      minRatio = std::min(minRatio, currRatio);
+    }
+
+    printf(" Iter: %d, time = %.2f, maxRatio = %.4f, minRatio = %.4f, convergeRatio = %.4f \n",
+           iter + 1, timer.update_time(), maxRatio, minRatio, 5e-4);
+
+    if (converged) {
+      cout << "Conjugate gradient reaches convergence at " << iter + 1 << " iteration" << endl;
+      ALIGN_FREE(p);
+      ALIGN_FREE(r);
+      ALIGN_FREE(VmultCovCompVecs);
+      break;
+    }
+
+    for (uint64 numbatch = 0, m = 0; numbatch < batchsize; numbatch++) {
+      double r2ratio = rsnew[numbatch] / rsold[numbatch];
+      for (uint64 n = 0; n < Npad; n++, m++)
+        p[m] = r[m] + r2ratio * p[m];
+    }
+
+    rsold = rsnew;
+  }
+
+}
+
+void LMMCPU::estimateFixEff_MPI(const double *Pheno, bool useApproximate) {
+  // solve the conjugate gradient omegia^-1y (without leaving one out strategy) together
+  const double *covarMatrix = covarBasis.getCovarMatrix(); // get covarMatrix
+
+  // combine covarMatrix and projectPheno
+  int batchsize = covarBasis.getC() + 1;
+  double *inputMatrix = ALIGN_ALLOCATE_DOUBLES(Npad * batchsize);
+  memcpy(inputMatrix, covarMatrix, covarBasis.getC() * Npad * sizeof(double)); // copy covarMatrix part
+  memcpy(inputMatrix + covarBasis.getC() * Npad, Pheno, Npad * sizeof(double)); // copy projectPheno part
+
+  // compute Z^TVinvChromy
+  conjugateResultFixEff = ALIGN_ALLOCATE_DOUBLES(Npad * batchsize);
+  memset(conjugateResultFixEff, 0, Npad * batchsize * sizeof(double));
+
+  if (!useApproximate) {
+    // compute the conjugate gradient to get the exact result
+    cout << endl << "Solve conjugate gradient in estimating fix effect " << endl;
+    calConjugateWithoutMask(conjugateResultFixEff, inputMatrix, batchsize); // get two parts conjugate gradient result
+  } else {
+    // use the approximate fix effect to boost the performance
+    memcpy(conjugateResultFixEff, inputMatrix, Npad * batchsize * sizeof(double));
+  }
+
+  // compute Z^Tomegia^-1Z
+  double *ZTOinvZ = ALIGN_ALLOCATE_DOUBLES(covarBasis.getC() * covarBasis.getC());
+
+  // parameters for clbas_dgemm
+  MKL_INT m = covarBasis.getC();
+  MKL_INT n = covarBasis.getC();
+  MKL_INT k = Npad;
+  const double alpha = 1.0;
+  MKL_INT lda = k;
+  MKL_INT ldb = k;
+  const double beta = 0.0;
+  const MKL_INT ldc = m;
+  cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, m, n, k, alpha, covarMatrix, lda, conjugateResultFixEff, ldb,
+              beta, ZTOinvZ, ldc);
+
+  // compute inverse of matrix CxC
+  compInverse(ZTOinvZ, covarBasis.getC());
+
+  // compute ZTOinvy
+  double *ZTOinvy = ALIGN_ALLOCATE_DOUBLES(covarBasis.getC());
+  memset(ZTOinvy, 0, covarBasis.getC() * sizeof(double));
+
+  // parameters for clbas_dgemv (reuse the old parameters delcaration)
+  const MKL_INT m1 = Npad;
+  const MKL_INT n1 = covarBasis.getC();
+  const double alpha1 = 1.0;
+  const double beta1 = 0.0;
+  const MKL_INT lda1 = m1;
+  const MKL_INT incx = 1;
+  const MKL_INT incy = 1;
+  double *vec = conjugateResultFixEff + covarBasis.getC() * Npad;
+
+  cblas_dgemv(CblasColMajor, CblasTrans, m1, n1, alpha1, covarMatrix, lda1, vec, incx, beta1, ZTOinvy, incy);
+
+  // compute the final fixed effect
+  fixEffect.reserve(covarBasis.getC());
+
+  m = covarBasis.getC();
+  n = covarBasis.getC();
+  lda = m;
+
+  cblas_dgemv(CblasColMajor, CblasNoTrans, m, n, alpha, ZTOinvZ, lda, ZTOinvy, incx, beta, fixEffect.data(), incy);
+
+  ALIGN_FREE(inputMatrix);
+  ALIGN_FREE(ZTOinvy);
+  ALIGN_FREE(ZTOinvZ);
+}
+
+void LMMCPU::computePosteriorMean_MPI(const double *pheno, bool useApproximate) {
+  // note the phenotype here is original
+  double *phenoData;
+  if (!useApproximate) {
+    // compute yhat = omega-1ZW
+    cout << endl << "compute posterior by exact way" << endl;
+    double *yhat = ALIGN_ALLOCATE_DOUBLES(Npad);
+    MKL_INT m = Npad;
+    MKL_INT n = covarBasis.getC();
+    double alpha = 1.0;
+    MKL_INT lda = m;
+    double beta = 0.0;
+    MKL_INT incx = 1;
+    MKL_INT incy = 1;
+    cblas_dgemv(CblasColMajor,
+                CblasNoTrans,
+                m,
+                n,
+                alpha,
+                conjugateResultFixEff,
+                lda,
+                fixEffect.data(),
+                incx,
+                beta,
+                yhat,
+                incy);
+
+    // compute omega-1y - yhat
+    double *omegaInvy = conjugateResultFixEff + covarBasis.getC() * Npad;
+    phenoData = ALIGN_ALLOCATE_DOUBLES(Npad);
+
+    for (uint64 n = 0; n < Npad; n++) {
+      phenoData[n] = omegaInvy[n] - yhat[n];
+    }
+    ALIGN_FREE(yhat);
+  } else {
+    cout << endl << "compute posterior by approximate way " << endl;
+    // compute Zw_hat
+    double *zw_hat = ALIGN_ALLOCATE_DOUBLES(Npad);
+    MKL_INT m = Npad;
+    MKL_INT n = covarBasis.getC();
+    double alpha = 1.0;
+    MKL_INT lda = m;
+    double beta = 0.0;
+    MKL_INT incx = 1;
+    MKL_INT incy = 1;
+    cblas_dgemv(CblasColMajor,
+                CblasNoTrans,
+                m,
+                n,
+                alpha,
+                covarBasis.getCovarMatrix(),
+                lda,
+                fixEffect.data(),
+                incx,
+                beta,
+                zw_hat,
+                incy);
+
+    // pheno vector reduce the zw_hat
+    for (uint64 n = 0; n < Npad; n++) {
+      zw_hat[n] = pheno[n] - zw_hat[n];
+    }
+
+    // solve a single conjugate gradient vector
+    phenoData = ALIGN_ALLOCATE_DOUBLES(Npad);
+    memset(phenoData, 0, Npad * sizeof(double));
+    calConjugateWithoutMask_MPI(phenoData, zw_hat, 1);
+    ALIGN_FREE(zw_hat);
+  }
+
+  // solve single conjugate gradient get result A
+  scalVec(phenoData, sigma2g, Npad); // scale the result of conjugate gradient (refer to the document)
+
+  // compute mu = X^TA, where A is a vector
+  auto* part_posteriorMean = ALIGN_ALLOCATE_DOUBLES(M);
+  posteriorMean.resize(M_MPI);
+  multXTmatrix(part_posteriorMean, phenoData, 1);
+
+
+  for (uint64 m = 0; m < M; m++) {
+    posteriorMean[m] /= sqrt(M_MPI); // scale X
+  }
+
+  // rescale the posterior mean
+  subIntercept = 0;
+  for (uint64 m = 0; m < M; m++) {
+    posteriorMean[m] /= sqrt(M_MPI) / Meanstd[m].second;
+    subIntercept += posteriorMean[m] * Meanstd[m].first;
+  }
+
+  // gather the subIntercept from each process
+  MPI_Allreduce(MPI_IN_PLACE, &subIntercept, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+
+  fixEffect[0] -= subIntercept; // subtract the intercept
+
+  // save fixeffect
+  int myid;
+  MPI_Comm_rank(MPI_COMM_WORLD, &myid);
+  FileUtils::SafeOfstream fout;
+  if (myid == 0) {
+    fout.open(outputFile + "_fixeff.txt");
+    for (int i = 0; i < covarBasis.getC(); i++) {
+      fout << fixEffect[i] << "\n";
+    }
+    fout.close();
+  }
+
+  fout.open(outputFile + "_posteriorMean_" + std::to_string(myid) + ".txt");
+  for (uint64 m = 0; m < M; m++) {
+    fout << posteriorMean[m] << "\n";
+  }
+  fout.close();
+
+  ALIGN_FREE(conjugateResultFixEff);
+  ALIGN_FREE(phenoData);
 }
 }
 

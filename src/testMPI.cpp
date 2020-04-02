@@ -153,6 +153,52 @@ int main(int argc, char** argv) {
 
   cout << "Time for computing heritability is " << timer.update_time() << " sec" << endl;
 
+  if (params.prediction) {
+    cout << endl << "***** Compute the estimate for fix effect w *****" << endl << endl;
+
+    vector<vector<double> > phenodblorigin = phenobasis.getPhenodbl(); // here we use the original pheno data
+    lmmcpu.estimateFixEff_MPI(phenodblorigin[0].data(), params.useApproFixEffect);
+
+    cout << "Timer for estimating fix effect " << timer.update_time() << " esc" << endl;
+
+    cout << endl << "***** Compute the posterior mean *****" << endl << endl;
+    lmmcpu.computePosteriorMean(phenodblorigin[0].data(), params.useApproFixEffect);
+
+    cout << "Timer for computing posterior mean " << timer.update_time() << " esc" << endl;
+
+    cout << endl << "***** Read the prediction data *****" << endl << endl;
+    GenoData singlepredictData(params.predfamFile, params.predbimFiles, params.predbedFiles, params.predremoveSnpsFiles,
+                               params.predremoveIndivsFiles, params.maxMissingPerSnp, params.maxMissingPerIndiv);
+
+    const vector<SnpInfo> &predictSnps = singlepredictData.getSnpInfo();
+
+    // the number of prediction SNPs cannot be too large
+    if (predictSnps.size() > params.maxModelSnps) {
+      cerr << "ERROR: Number of prediction SNPs exceeds maxModelSnps = " << params.maxModelSnps << endl;
+      exit(1);
+    }
+
+    // the number of prediction snps should be equal to training snps
+    if (predictSnps.size() != snps.size()) {
+      cerr << "Error: Number of prediction SNPs should be equal the number of training SNPs " << endl;
+      exit(1);
+    }
+
+    // read predict covariate data
+    vector<double> singPredmaskIndivs(singlepredictData.getNpad());
+    singlepredictData.writeMaskIndivs(singPredmaskIndivs.data());
+    CovarBasis<GenoData> predictCov(params.predcovarFile, singlepredictData, params.precovarCols, singPredmaskIndivs);
+
+    cout << "Time for setting up dataset and read prediction data " << timer.update_time() << " sec" << endl;
+
+    // predict the new phenotype based on the posterior mean
+
+    double *predictOutput = ALIGN_ALLOCATE_DOUBLES(singlepredictData.getNpad());
+    lmmcpu.predict(predictOutput, singlepredictData, predictCov);
+
+    cout << "Timer for predict new data " << timer.update_time() << " esc" << endl;
+
+  }
   MPI_Finalize();
   if (id == 0) {
     cout << "Total elapsed time for analysis = " << (timer.get_time() - start_time) << " sec"

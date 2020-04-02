@@ -21,7 +21,7 @@
 #include <vector>
 #include <string>
 #include <map>
-#include <boost/utility.hpp>
+//#include <boost/utility.hpp>
 
 #include "TypeDef.h"
 #include "IOUtils.h"
